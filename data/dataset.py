@@ -1,6 +1,46 @@
 from datasets import load_dataset, load_from_disk
 from pathlib import Path
+from torch.utils.data import Dataset, DataLoader
+from typing import Any
+from tokenizer import Tokenizer
 import pathlib
+
+class CodeDocDataset(Dataset):
+
+    def __init__(self, dataset, sequence_length: int, tokenizer: Tokenizer) -> None:
+        super().__init__()
+
+        # Use int to represent the index. 
+        self.src_array = {}
+        self.tgt_array = {}
+        self.tokenizer = tokenizer
+        self.num = 0
+
+        # Divide each data by sequence_length
+        for data in dataset:
+            source_tokens, target_tokens = data['func_code_tokens'], data['func_documentation_tokens']
+
+            source_tokens = self._pad_or_trunc(source_tokens, sequence_length)
+            target_tokens = self._pad_or_trunc(target_tokens, sequence_length)
+
+            self.src_array[self.num] = self.tokenizer.to_idx(source_tokens) + [self.tokenizer.to_idx(self.tokenizer.eos)]
+            self.tgt_array[self.num] = [self.tokenizer.to_idx(self.tokenizer.bos)] + self.tokenizer.to_idx(target_tokens)
+            self.num += 1
+    
+    def __len__(self) -> int:
+        return self.num
+    
+    def __getitem__(self, index):
+        return (self.src_array[index], self.tgt_array[index])
+
+    def _pad_or_trunc(self, tokens: list[str], sequence_length: int) -> list[str]:
+        if len(tokens) > sequence_length:
+            return tokens[:sequence_length]
+        
+        if len(tokens) < sequence_length:
+            return tokens + [self.tokenizer.pad for _ in range(len(tokens) - sequence_length)]
+        
+        return tokens
 
 
 def _filter_dataset(ds, min_doc_token: int, max_doc_token: int, min_code_token: int, max_code_token: int, language='python') -> bool:
@@ -41,15 +81,23 @@ def _filter_columns_from_dataset(datasets, columns_to_save: list):
     for dataset in datasets:
         datasets[dataset] = datasets[dataset].remove_columns(dataset_columns_to_remove[dataset])
 
+def _tokenize(example, tokenizer: Tokenizer) -> int:
+    return {
+        'func_code_tokens': tokenizer.to_idx(example['func_code_tokens']),
+        'func_documentation_tokens': tokenizer.to_idx(example['func_documentation_tokens']),
+    }
 
-def prepare_datasets(data_local_path: Path):
+def prepare_datasets(data_local_path: Path, tokenizer: Tokenizer):
+
+    TOKENIZER_JSON_STR = 'tokenizer_json.json'
 
     if data_local_path.exists():
+        tokenizer = Tokenizer.load_from_disk(data_local_path / TOKENIZER_JSON_STR)
         return load_from_disk(data_local_path)
 
     # dataset is splitted into train, valid, and test
     datasets = load_dataset("code_search_net", "python", trust_remote_code=True)
-    datasets.filter(lambda ds: _filter_dataset(
+    datasets = datasets.filter(lambda ds: _filter_dataset(
         ds=ds,
         min_doc_token=0,
         max_doc_token=256,
@@ -59,20 +107,30 @@ def prepare_datasets(data_local_path: Path):
 
     # only need func_code_tokens and func_documentation_tokens.
     columns_to_save = [
+        'func_code_string',
         'func_code_tokens',
+        'func_documentation_string',
         'func_documentation_tokens'
     ]
     _filter_columns_from_dataset(datasets, columns_to_save)
 
+    # Tokenize datasets
+    datasets = datasets.map(lambda example: _tokenize(example, tokenizer))
+
     datasets.save_to_disk(data_local_path)
+    tokenizer.save_to_disk(data_local_path / TOKENIZER_JSON_STR)
 
     return datasets
 
 
 if __name__ == '__main__':
     data_local_path = pathlib.Path.cwd() / 'data' / 'preprocessed_dataset'
-    datasets = prepare_datasets(data_local_path)
+    tokenizer = Tokenizer()
+    datasets = prepare_datasets(data_local_path, tokenizer)
+
     print(datasets)
+
+
 
 
 
