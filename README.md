@@ -14,11 +14,11 @@ Build a system that can take a natural language query and return the most releva
 
 ### Minor Steps:
 
-- [ ] **Set up environment**
+- [✅] **Set up environment**
   - Create a Python virtual environment.
   - Install dependencies: `transformers`, `datasets`, `torch`, `scikit-learn`, etc.
 
-- [ ] **Download and explore the dataset**
+- [✅] **Download and explore the dataset**
   - Use:
     ```python
     from datasets import load_dataset
@@ -26,7 +26,7 @@ Build a system that can take a natural language query and return the most releva
     ```
   - Explore fields like `code`, `docstring`, and `func_name`.
 
-- [ ] **Clean and preprocess data**
+- [✅] **Clean and preprocess data**
   - Normalize whitespaces and case.
   - Filter out unusually short or long entries.
   - Tokenize both code and natural language using a transformer tokenizer.
