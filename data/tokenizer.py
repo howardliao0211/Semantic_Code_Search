@@ -83,17 +83,13 @@ class Tokenizer:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(self.word2index, f, ensure_ascii=False, indent=2)
 
-    @staticmethod
-    def load_from_disk(path: pathlib.Path) -> 'Tokenizer':
+    def load_from_disk(self, path: pathlib.Path):
         with open(path, 'r', encoding='utf-8') as f:
             word2index = json.load(f)
 
-        tokenizer = Tokenizer()
-        tokenizer.word2index = word2index
-        tokenizer.index2word = {int(v): k for k, v in word2index.items()}
-        tokenizer.num = len(word2index)
-
-        return tokenizer
+        self.word2index = word2index
+        self.index2word = {int(v): k for k, v in word2index.items()}
+        self.num = len(word2index)
 
 
 if __name__ == '__main__':

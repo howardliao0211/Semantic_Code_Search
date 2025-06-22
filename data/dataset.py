@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 from typing import Any
 from tokenizer import Tokenizer
 import pathlib
+import torch
 
 class CodeDocDataset(Dataset):
 
@@ -11,27 +12,22 @@ class CodeDocDataset(Dataset):
         super().__init__()
 
         # Use int to represent the index. 
-        self.src_array = {}
-        self.tgt_array = {}
+        self.dataset = dataset
         self.tokenizer = tokenizer
-        self.num = 0
-
-        # Divide each data by sequence_length
-        for data in dataset:
-            source_tokens, target_tokens = data['func_code_tokens'], data['func_documentation_tokens']
-
-            source_tokens = self._pad_or_trunc(source_tokens, sequence_length)
-            target_tokens = self._pad_or_trunc(target_tokens, sequence_length)
-
-            self.src_array[self.num] = self.tokenizer.to_idx(source_tokens) + [self.tokenizer.to_idx(self.tokenizer.eos)]
-            self.tgt_array[self.num] = [self.tokenizer.to_idx(self.tokenizer.bos)] + self.tokenizer.to_idx(target_tokens)
-            self.num += 1
+        self.sequence_length = sequence_length
     
     def __len__(self) -> int:
-        return self.num
+        return len(self.dataset)
     
     def __getitem__(self, index):
-        return (self.src_array[index], self.tgt_array[index])
+        source_tokens, target_tokens = self.dataset[index]['func_code_tokens'], self.dataset[index]['func_documentation_tokens']
+        source_tokens, target_tokens = self._pad_or_trunc(source_tokens, self.sequence_length), self._pad_or_trunc(target_tokens, self.sequence_length)
+
+        source_tokens += [self.tokenizer.to_idx(self.tokenizer.eos)]
+        target_tokens = [self.tokenizer.to_idx(self.tokenizer.bos)] + target_tokens
+
+        source_tokens, target_tokens = torch.tensor(source_tokens, dtype=torch.float32), torch.tensor(target_tokens, dtype=torch.float32)
+        return (source_tokens, target_tokens)
 
     def _pad_or_trunc(self, tokens: list[str], sequence_length: int) -> list[str]:
         if len(tokens) > sequence_length:
@@ -87,22 +83,22 @@ def _tokenize(example, tokenizer: Tokenizer) -> int:
         'func_documentation_tokens': tokenizer.to_idx(example['func_documentation_tokens']),
     }
 
-def prepare_datasets(data_local_path: Path, tokenizer: Tokenizer):
+def prepare_datasets(data_local_path: Path, tokenizer: Tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token):
 
     TOKENIZER_JSON_STR = 'tokenizer_json.json'
 
     if data_local_path.exists():
-        tokenizer = Tokenizer.load_from_disk(data_local_path / TOKENIZER_JSON_STR)
+        tokenizer.load_from_disk(data_local_path / TOKENIZER_JSON_STR)
         return load_from_disk(data_local_path)
 
     # dataset is splitted into train, valid, and test
     datasets = load_dataset("code_search_net", "python", trust_remote_code=True)
     datasets = datasets.filter(lambda ds: _filter_dataset(
         ds=ds,
-        min_doc_token=0,
-        max_doc_token=256,
-        min_code_token=0,
-        max_code_token=256
+        min_doc_token=min_doc_token,
+        max_doc_token=max_doc_token,
+        min_code_token=min_code_token,
+        max_code_token=max_code_token
     ))
 
     # only need func_code_tokens and func_documentation_tokens.
@@ -123,12 +119,20 @@ def prepare_datasets(data_local_path: Path, tokenizer: Tokenizer):
     return datasets
 
 
+def get_datasets(data_local_path: Path, tokenizer: Tokenizer, sequence_length=256, min_doc_token=0, max_doc_token=256, min_code_token=0, max_code_token=256):
+    datasets = prepare_datasets(data_local_path, tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token)
+    train_dataset = CodeDocDataset(datasets['train'], sequence_length, tokenizer)
+    test_dataset = CodeDocDataset(datasets['test'], sequence_length, tokenizer)
+    validation_dataset = CodeDocDataset(datasets['validation'], sequence_length, tokenizer)
+
+    return train_dataset, test_dataset, validation_dataset
+
 if __name__ == '__main__':
+    min_doc_token, max_doc_token, min_code_token, max_code_token = 0, 256, 0, 256
     data_local_path = pathlib.Path.cwd() / 'data' / 'preprocessed_dataset'
     tokenizer = Tokenizer()
-    datasets = prepare_datasets(data_local_path, tokenizer)
-
-    print(datasets)
+    train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path, tokenizer, sequence_length=256)
+    print(len(tokenizer))
 
 
 
