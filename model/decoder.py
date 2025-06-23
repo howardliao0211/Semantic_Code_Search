@@ -33,6 +33,9 @@ class RNNDecoder(nn.Module):
                 # we need to squeeze the last dimension so that the decoder_input shape will still be (batch, 1)
                 out_value, out_idx = decoder_output.topk(k=1, dim=-1)
                 decoder_input = out_idx.squeeze(-1)
+                
+                # need to detach so that gradient will not explode or vanish.
+                decoder_input.detach()
         
         # decoder_outputs will be a list of tensor with shape (batch, 1, output_size)
         decoder_outputs = torch.cat(decoder_outputs, dim=1)

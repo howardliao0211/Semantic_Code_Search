@@ -20,16 +20,19 @@ class CodeDocDataset(Dataset):
         return len(self.dataset)
     
     def __getitem__(self, index):
-        source_tokens, target_tokens = self.dataset[index]['func_code_tokens'], self.dataset[index]['func_documentation_tokens']
-        source_tokens, target_tokens = self._pad_or_trunc(source_tokens, self.sequence_length), self._pad_or_trunc(target_tokens, self.sequence_length)
+        source_tokens = self.dataset[index]['func_code_tokens']
+        target_tokens = self.dataset[index]['func_documentation_tokens']
+        
+        source_tokens = self._pad_or_trunc(source_tokens, self.sequence_length-1)
+        target_tokens = self._pad_or_trunc(target_tokens, self.sequence_length-1)
 
-        encoder_input = source_tokens + [self.tokenizer.to_idx(self.tokenizer.eos)]
-        decoder_input = target_tokens + [self.tokenizer.to_idx(self.tokenizer.eos)]
-        decoder_output = [self.tokenizer.to_idx(self.tokenizer.bos)] + target_tokens
+        encoder_input = source_tokens + [self.tokenizer.eos_token]
+        decoder_input = target_tokens + [self.tokenizer.eos_token]
+        decoder_output = [self.tokenizer.bos_token] + target_tokens
 
         encoder_input = torch.tensor(encoder_input, dtype=torch.int32)
         decoder_input = torch.tensor(decoder_input, dtype=torch.int32)
-        decoder_output = torch.tensor(decoder_output, dtype=torch.int32)
+        decoder_output = torch.LongTensor(decoder_output)
 
         return (encoder_input, decoder_input, decoder_output)
 
@@ -38,7 +41,7 @@ class CodeDocDataset(Dataset):
             return tokens[:sequence_length]
         
         if len(tokens) < sequence_length:
-            return tokens + [self.tokenizer.pad for _ in range(len(tokens) - sequence_length)]
+            return tokens + [self.tokenizer.pad_token for _ in range(sequence_length - len(tokens))]
         
         return tokens
 

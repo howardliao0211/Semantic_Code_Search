@@ -57,6 +57,18 @@ class Tokenizer:
     def pad(self) -> str:
         return PAD_STR
     
+    @property
+    def bos_token(self) -> int:
+        return self.to_idx(self.bos)
+    
+    @property
+    def eos_token(self) -> int:
+        return self.to_idx(self.eos)
+    
+    @property
+    def pad_token(self) -> int:
+        return self.to_idx(self.pad)
+    
     def to_idx(self, token):
         
         if isinstance(token, list):
