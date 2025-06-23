@@ -23,11 +23,15 @@ class CodeDocDataset(Dataset):
         source_tokens, target_tokens = self.dataset[index]['func_code_tokens'], self.dataset[index]['func_documentation_tokens']
         source_tokens, target_tokens = self._pad_or_trunc(source_tokens, self.sequence_length), self._pad_or_trunc(target_tokens, self.sequence_length)
 
-        source_tokens += [self.tokenizer.to_idx(self.tokenizer.eos)]
-        target_tokens = [self.tokenizer.to_idx(self.tokenizer.bos)] + target_tokens
+        encoder_input = source_tokens + [self.tokenizer.to_idx(self.tokenizer.eos)]
+        decoder_input = target_tokens + [self.tokenizer.to_idx(self.tokenizer.eos)]
+        decoder_output = [self.tokenizer.to_idx(self.tokenizer.bos)] + target_tokens
 
-        source_tokens, target_tokens = torch.tensor(source_tokens, dtype=torch.float32), torch.tensor(target_tokens, dtype=torch.float32)
-        return (source_tokens, target_tokens)
+        encoder_input = torch.tensor(encoder_input, dtype=torch.int32)
+        decoder_input = torch.tensor(decoder_input, dtype=torch.int32)
+        decoder_output = torch.tensor(decoder_output, dtype=torch.int32)
+
+        return (encoder_input, decoder_input, decoder_output)
 
     def _pad_or_trunc(self, tokens: list[str], sequence_length: int) -> list[str]:
         if len(tokens) > sequence_length:
