@@ -2,7 +2,7 @@ from datasets import load_dataset, load_from_disk
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from typing import Any
-from tokenizer import Tokenizer
+from .tokenizer import Tokenizer
 import pathlib
 import torch
 
@@ -83,7 +83,7 @@ def _tokenize(example, tokenizer: Tokenizer) -> int:
         'func_documentation_tokens': tokenizer.to_idx(example['func_documentation_tokens']),
     }
 
-def prepare_datasets(data_local_path: Path, tokenizer: Tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token):
+def _prepare_datasets(data_local_path: Path, tokenizer: Tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token):
 
     TOKENIZER_JSON_STR = 'tokenizer_json.json'
 
@@ -120,7 +120,7 @@ def prepare_datasets(data_local_path: Path, tokenizer: Tokenizer, min_doc_token,
 
 
 def get_datasets(data_local_path: Path, tokenizer: Tokenizer, sequence_length=256, min_doc_token=0, max_doc_token=256, min_code_token=0, max_code_token=256):
-    datasets = prepare_datasets(data_local_path, tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token)
+    datasets = _prepare_datasets(data_local_path, tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token)
     train_dataset = CodeDocDataset(datasets['train'], sequence_length, tokenizer)
     test_dataset = CodeDocDataset(datasets['test'], sequence_length, tokenizer)
     validation_dataset = CodeDocDataset(datasets['validation'], sequence_length, tokenizer)

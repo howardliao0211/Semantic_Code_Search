@@ -37,15 +37,8 @@ Build a system that can take a natural language query and return the most releva
 
 ### Minor Steps:
 
-- [ ] **Choose a transformer model**
-  - Start with pretrained models such as `microsoft/codebert-base`.
-
-- [ ] **Create query and code encoders**
-  - Build dual encoders for natural language and code inputs.
-
-- [ ] **Build training pairs**
-  - Positive pairs: matching docstring and function.
-  - Negative pairs: random or hard-negatives.
+- [ ] **Build a easy baseline model**
+  - Use GRU to build an easy sequence to sequence model.
 
 - [ ] **Implement contrastive/triplet loss**
   - E.g., cosine similarity with margin-based loss or InfoNCE.
@@ -53,6 +46,14 @@ Build a system that can take a natural language query and return the most releva
 - [ ] **Train the model**
   - Train and validate on subsets.
   - Track loss and retrieval performance.
+  - Valid function with baseline model
+
+- [ ] **Create attention-based encoder and decoder**
+  - Implement attention-based encoder and decoder.
+  - Expect to see improvement on prediction accurarcy.
+
+- [ ] **Create query and code encoders**
+  - Build dual encoders for natural language and code inputs.
 
 ---
 
