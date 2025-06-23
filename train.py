@@ -13,7 +13,7 @@ import model.seq2seq
 @dataclass
 class CodeDocTrainer(BaseTrainer):
 
-    tokenizer: Tokenizer
+    bos_token: int
 
     def train_loop(self):
         self.model.train()
@@ -24,7 +24,7 @@ class CodeDocTrainer(BaseTrainer):
             decoder_input = decoder_input.to(self.device)
             decoder_output = decoder_output.to(self.device)
 
-            predict = self.model(source_tokens, self.tokenizer.bos_token, decoder_input)
+            predict = self.model(source_tokens, self.bos_token, decoder_input)
             loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
             self.optimizer.zero_grad()
@@ -49,7 +49,7 @@ class CodeDocTrainer(BaseTrainer):
             decoder_output = decoder_output.to(self.device)
 
             with torch.no_grad():
-                predict = self.model(source_tokens, self.tokenizer.bos_token)
+                predict = self.model(source_tokens, self.bos_token)
                 loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
                 test_loss += loss.item()
 
@@ -59,39 +59,51 @@ class CodeDocTrainer(BaseTrainer):
         return {'Test Loss': test_loss}
 
 def main():
+
+    # Configure sizes
+    input_size = 8192
+    output_size = 8192
+    batch_size = 64
+    hidden_size = 64
+
     # Get datasets
     DATASET_LOCAL_PATH = Path(r'./preprocessed_dataset')
-    tokenizer = Tokenizer()
+    code_tokenizer = Tokenizer(input_size)
+    doc_tokenizer = Tokenizer(output_size)
     train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path=DATASET_LOCAL_PATH,
-                                                      tokenizer=tokenizer,
-                                                      sequence_length=16)
+                                                      code_tokenizer=code_tokenizer,
+                                                      doc_tokenizer=doc_tokenizer,
+                                                      sequence_length=256)
 
     # Create data loaders
     train_loader = DataLoader(
         dataset=train_dataset,
-        batch_size=64,
+        batch_size=batch_size,
         shuffle=True
     )
 
     test_loader = DataLoader(
         dataset=test_dataset,
-        batch_size=64,
+        batch_size=batch_size,
         shuffle=False
     )
 
     val_loader = DataLoader(
         dataset=validation_dataset,
-        batch_size=64,
+        batch_size=batch_size,
         shuffle=False
     )
 
     # Prepare model
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    input_size = output_size = len(tokenizer)
-    hidden_size = 64
-    encoder = model.encoder.RNNEncoder(input_size, hidden_size).to(device)
-    decoder = model.decoder.RNNDecoder(hidden_size, output_size).to(device)
+    encoder_input_size = len(code_tokenizer)
+    decoder_output_size = len(doc_tokenizer)
+    encoder = model.encoder.RNNEncoder(encoder_input_size, hidden_size).to(device)
+    decoder = model.decoder.RNNDecoder(hidden_size, decoder_output_size).to(device)
     seq2seq = model.seq2seq.Seq2SeqModel(encoder, decoder).to(device)
+
+    print(f'encoder_input_size: {encoder_input_size}')
+    print(f'decoder_output_size: {decoder_output_size}')
 
     # Prepare Trainer
     trainer = CodeDocTrainer(
@@ -102,7 +114,7 @@ def main():
         train_loader=train_loader,
         test_loader=test_loader,
         device=device,
-        tokenizer=tokenizer,
+        bos_token=code_tokenizer.bos_token
     )
 
     trainer.fit(

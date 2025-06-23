@@ -8,13 +8,15 @@ import torch
 
 class CodeDocDataset(Dataset):
 
-    def __init__(self, dataset, sequence_length: int, tokenizer: Tokenizer) -> None:
+    def __init__(self, dataset, sequence_length: int, eos_token: int, bos_token: int, pad_token: int) -> None:
         super().__init__()
 
         # Use int to represent the index. 
         self.dataset = dataset
-        self.tokenizer = tokenizer
         self.sequence_length = sequence_length
+        self.eos_token = eos_token
+        self.bos_token = bos_token
+        self.pad_token = pad_token
     
     def __len__(self) -> int:
         return len(self.dataset)
@@ -26,9 +28,9 @@ class CodeDocDataset(Dataset):
         source_tokens = self._pad_or_trunc(source_tokens, self.sequence_length-1)
         target_tokens = self._pad_or_trunc(target_tokens, self.sequence_length-1)
 
-        encoder_input = source_tokens + [self.tokenizer.eos_token]
-        decoder_input = target_tokens + [self.tokenizer.eos_token]
-        decoder_output = [self.tokenizer.bos_token] + target_tokens
+        encoder_input = source_tokens + [self.eos_token]
+        decoder_input = target_tokens + [self.eos_token]
+        decoder_output = [self.bos_token] + target_tokens
 
         encoder_input = torch.tensor(encoder_input, dtype=torch.int32)
         decoder_input = torch.tensor(decoder_input, dtype=torch.int32)
@@ -41,7 +43,7 @@ class CodeDocDataset(Dataset):
             return tokens[:sequence_length]
         
         if len(tokens) < sequence_length:
-            return tokens + [self.tokenizer.pad_token for _ in range(sequence_length - len(tokens))]
+            return tokens + [self.pad_token for _ in range(sequence_length - len(tokens))]
         
         return tokens
 
@@ -84,18 +86,20 @@ def _filter_columns_from_dataset(datasets, columns_to_save: list):
     for dataset in datasets:
         datasets[dataset] = datasets[dataset].remove_columns(dataset_columns_to_remove[dataset])
 
-def _tokenize(example, tokenizer: Tokenizer) -> int:
+def _tokenize(example, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> int:
     return {
-        'func_code_tokens': tokenizer.to_idx(example['func_code_tokens']),
-        'func_documentation_tokens': tokenizer.to_idx(example['func_documentation_tokens']),
+        'func_code_tokens': code_tokenizer.to_idx(example['func_code_tokens']),
+        'func_documentation_tokens': doc_tokenizer.to_idx(example['func_documentation_tokens']),
     }
 
-def _prepare_datasets(data_local_path: Path, tokenizer: Tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token):
+def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token):
 
-    TOKENIZER_JSON_STR = 'tokenizer_json.json'
+    CODE_TOKENIZER_JSON_STR = 'code_tokenizer_json.json'
+    DOC_TOKENIZER_JSON_STR = 'doc_tokenizer_json.json'
 
     if data_local_path.exists():
-        tokenizer.load_from_disk(data_local_path / TOKENIZER_JSON_STR)
+        code_tokenizer.load_from_disk(data_local_path / CODE_TOKENIZER_JSON_STR)
+        doc_tokenizer.load_from_disk(data_local_path / DOC_TOKENIZER_JSON_STR)
         return load_from_disk(data_local_path)
 
     # dataset is splitted into train, valid, and test
@@ -108,6 +112,16 @@ def _prepare_datasets(data_local_path: Path, tokenizer: Tokenizer, min_doc_token
         max_code_token=max_code_token
     ))
 
+    # Load code token in tokenizer
+    for dataset in datasets.values():
+        for data in dataset:
+            code_tokenizer.update_tokens(data['func_code_tokens'])
+            doc_tokenizer.update_tokens(data['func_documentation_tokens'])
+    code_tokenizer.build_most_freq_tokens()
+    doc_tokenizer.build_most_freq_tokens()
+    print(f'Top 10 most frequent code: {code_tokenizer.counter.most_common(10)}')
+    print(f'Top 10 most frequent doc: {doc_tokenizer.counter.most_common(10)}')
+
     # only need func_code_tokens and func_documentation_tokens.
     columns_to_save = [
         'func_code_string',
@@ -118,19 +132,22 @@ def _prepare_datasets(data_local_path: Path, tokenizer: Tokenizer, min_doc_token
     _filter_columns_from_dataset(datasets, columns_to_save)
 
     # Tokenize datasets
-    datasets = datasets.map(lambda example: _tokenize(example, tokenizer))
+    datasets = datasets.map(lambda example: _tokenize(example, code_tokenizer, doc_tokenizer))
 
     datasets.save_to_disk(data_local_path)
-    tokenizer.save_to_disk(data_local_path / TOKENIZER_JSON_STR)
+    code_tokenizer.save_to_disk(data_local_path / CODE_TOKENIZER_JSON_STR)
+    doc_tokenizer.save_to_disk(data_local_path / DOC_TOKENIZER_JSON_STR)
 
     return datasets
 
 
-def get_datasets(data_local_path: Path, tokenizer: Tokenizer, sequence_length=256, min_doc_token=0, max_doc_token=256, min_code_token=0, max_code_token=256):
-    datasets = _prepare_datasets(data_local_path, tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token)
-    train_dataset = CodeDocDataset(datasets['train'], sequence_length, tokenizer)
-    test_dataset = CodeDocDataset(datasets['test'], sequence_length, tokenizer)
-    validation_dataset = CodeDocDataset(datasets['validation'], sequence_length, tokenizer)
+def get_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, sequence_length=256, min_doc_token=0, max_doc_token=256, min_code_token=0, max_code_token=256):
+    eos_token, bos_token, pad_token = code_tokenizer.eos_token, code_tokenizer.bos_token, code_tokenizer.pad_token
+
+    datasets = _prepare_datasets_and_tokenizers(data_local_path, code_tokenizer, doc_tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token)
+    train_dataset = CodeDocDataset(datasets['train'], sequence_length, eos_token, bos_token, pad_token)
+    test_dataset = CodeDocDataset(datasets['test'], sequence_length, eos_token, bos_token, pad_token)
+    validation_dataset = CodeDocDataset(datasets['validation'], sequence_length, eos_token, bos_token, pad_token)
 
     return train_dataset, test_dataset, validation_dataset
 

@@ -16,6 +16,7 @@
 
 3. If the token is target, add <bos> at the beginning.
 """
+from collections import Counter
 import pathlib
 import json
 
@@ -31,19 +32,19 @@ UNK_STR = '<unk>'
 
 class Tokenizer:
 
-    def __init__(self) -> None:
+    def __init__(self, size: int) -> None:
         self.word2index = {
             EOS_STR: EOS_IDX,
             BOS_STR: BOS_IDX,
             PAD_STR: PAD_IDX,
             UNK_STR: UNK_IDX
         }
-
         self.index2word = {
             v: k for k, v in self.word2index.items()
         }
-
-        self.num = len(self.word2index)
+        self.counter = Counter()
+        self.topk_freq = size - 4 # reserve 4 spaces for special tokens
+        self.num = 4
     
     @property
     def eos(self) -> str:
@@ -58,21 +59,39 @@ class Tokenizer:
         return PAD_STR
     
     @property
+    def unk(self) -> str:
+        return UNK_STR
+    
+    @property
     def bos_token(self) -> int:
-        return self.to_idx(self.bos)
+        return BOS_IDX
     
     @property
     def eos_token(self) -> int:
-        return self.to_idx(self.eos)
+        return EOS_IDX
     
     @property
     def pad_token(self) -> int:
-        return self.to_idx(self.pad)
+        return PAD_IDX
+    
+    @property
+    def unk_token(self) -> int:
+        return UNK_IDX
+    
+    def update_tokens(self, tokens: list[str]):
+        self.counter.update(tokens)
+
+    def build_most_freq_tokens(self):
+        # Use set because the lookup time complexity if O(1).
+        self.most_freq_tokens = {word for word, freq in self.counter.most_common(self.topk_freq)}
     
     def to_idx(self, token):
         
         if isinstance(token, list):
             return [self.to_idx(tok) for tok in token]
+
+        if token not in self.most_freq_tokens:
+            return self.unk_token
 
         if token not in self.word2index:
             self.word2index[token] = self.num
@@ -92,26 +111,38 @@ class Tokenizer:
         return self.num
     
     def save_to_disk(self, path: pathlib.Path) -> None:
+        data = {
+            'word2index': self.word2index,
+            'counter': dict(self.counter),
+            'topk_freq': self.topk_freq,
+            'num': self.num,
+            'most_freq_tokens': list(self.most_freq_tokens)  # Convert set to list for JSON
+        }
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(self.word2index, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def load_from_disk(self, path: pathlib.Path):
         with open(path, 'r', encoding='utf-8') as f:
-            word2index = json.load(f)
+            data = json.load(f)
 
-        self.word2index = word2index
-        self.index2word = {int(v): k for k, v in word2index.items()}
-        self.num = len(word2index)
+        self.word2index = data['word2index']
+        self.index2word = {v: k for k, v in self.word2index.items()}
+        self.counter = Counter(data['counter'])
+        self.topk_freq = data['topk_freq']
+        self.num = data['num']
+        self.most_freq_tokens = set(data['most_freq_tokens'])  # Restore set from list
 
 
 if __name__ == '__main__':
-    test_sentence = 'I want to go home'
-    test_tokens = test_sentence.split()
-    tokenizer = Tokenizer()
-    token_index = tokenizer.to_idx(test_tokens)
-    print(token_index)
-    print(tokenizer.to_word(token_index))
+    c = Counter()
 
+    c.update('i want to sleep'.split())
+    c.update('i want to sleep'.split())
+    c.update('i want to sleep'.split())
+    c.update('i want to sleep'.split())
+
+    print(f'most common: {c.most_common(2)}')
+    print('i' in [word for word, freq in c.most_common(2)])
 
     
     
