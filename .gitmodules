@@ -1,0 +1,3 @@
+[submodule "Trainers"]
+	path = Trainers
+	url = https://github.com/howardliao0211/Trainers
