@@ -24,6 +24,7 @@ class CodeDocTrainer(BaseTrainer):
             decoder_input = decoder_input.to(self.device)
             decoder_output = decoder_output.to(self.device)
 
+            # Include decoder input for teacher forcing.
             predict = self.model(source_tokens, decoder_input)
             loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
@@ -49,7 +50,7 @@ class CodeDocTrainer(BaseTrainer):
             decoder_output = decoder_output.to(self.device)
 
             with torch.no_grad():
-                predict = self.model(source_tokens, self.bos_token)
+                predict = self.model(source_tokens)
                 loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
                 test_loss += loss.item()
 
