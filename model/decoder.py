@@ -5,13 +5,14 @@ import torch
 
 class RNNDecoder(nn.Module):
 
-    def __init__(self, hidden_size: int, output_size: int, bos_token: int) -> None:
+    def __init__(self, hidden_size: int, output_size: int, bos_token: int, eos_token: int) -> None:
         super(RNNDecoder, self).__init__()
 
         self.emb = nn.Embedding(output_size, hidden_size)
         self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.bos_token = bos_token
+        self.eos_token = eos_token
 
     def forward(self, encoder_output: torch.Tensor, encoder_hidden: torch.Tensor, tgt_tensor: torch.Tensor|Any=None):
         batch_size, seq_size = encoder_output.size(0), encoder_output.size(1)
@@ -37,6 +38,10 @@ class RNNDecoder(nn.Module):
                 
                 # need to detach so that gradient will not explode or vanish.
                 decoder_input.detach()
+
+                # If the model predict eos_token, then stop predicting.
+                if (decoder_input == self.eos_token).all():
+                    break
         
         # decoder_outputs will be a list of tensor with shape (batch, 1, output_size)
         decoder_outputs = torch.cat(decoder_outputs, dim=1)
@@ -51,6 +56,8 @@ class RNNDecoder(nn.Module):
         lin_out = self.out(gru_out)
         return lin_out, hidden_state
 
+class BahdanauAttentionDecoder(nn.Module):
+    pass
 
 if __name__ == '__main__':
     

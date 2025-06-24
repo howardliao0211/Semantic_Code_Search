@@ -26,14 +26,14 @@ if __name__ == '__main__':
     output_size = input_size
 
     encoder = RNNEncoder(input_size, hidden_size)
-    decoder = RNNDecoder(hidden_size, output_size)
+    decoder = RNNDecoder(hidden_size, output_size, bos_token=1)
     seq2seq = Seq2SeqModel(encoder, decoder)
 
     batch_size = 64
     seq_size = 128
 
     intput_tensor = torch.randint(1, input_size, (batch_size, seq_size))
-    output = seq2seq(intput_tensor, 1)
+    output = seq2seq(intput_tensor, torch.randint(1, output_size, (batch_size, seq_size)))
     
     print(f'output shape (expect {batch_size}, {seq_size}, {output_size}): {output.shape}')
 
