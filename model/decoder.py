@@ -5,16 +5,17 @@ import torch
 
 class RNNDecoder(nn.Module):
 
-    def __init__(self, hidden_size: int, output_size: int) -> None:
+    def __init__(self, hidden_size: int, output_size: int, bos_token: int) -> None:
         super(RNNDecoder, self).__init__()
 
         self.emb = nn.Embedding(output_size, hidden_size)
         self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
+        self.bos_token = bos_token
 
-    def forward(self, encoder_output: torch.Tensor, encoder_hidden: torch.Tensor, bos_token: int, tgt_tensor: torch.Tensor|Any=None):
+    def forward(self, encoder_output: torch.Tensor, encoder_hidden: torch.Tensor, tgt_tensor: torch.Tensor|Any=None):
         batch_size, seq_size = encoder_output.size(0), encoder_output.size(1)
-        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=encoder_output.device).fill_(bos_token)
+        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=encoder_output.device).fill_(self.bos_token)
 
         decoder_outputs = []
         decoder_hidden = encoder_hidden
@@ -40,7 +41,9 @@ class RNNDecoder(nn.Module):
         # decoder_outputs will be a list of tensor with shape (batch, 1, output_size)
         decoder_outputs = torch.cat(decoder_outputs, dim=1)
         decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
-        return decoder_outputs, decoder_hidden
+        
+        # Append a None so that the output of the decoder would be the same as the attention decoder. 
+        return decoder_outputs, decoder_hidden, None
 
     def _forward_step(self, input, hidden) -> tuple[torch.Tensor, torch.Tensor]:
         emb_out = F.relu(self.emb(input))

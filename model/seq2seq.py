@@ -16,9 +16,9 @@ class Seq2SeqModel(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
     
-    def forward(self, source_tokens, bos_token, decoder_inputs = None) -> torch.Tensor:
+    def forward(self, source_tokens, decoder_inputs = None) -> torch.Tensor:
         encoder_output, encoder_hidden = self.encoder(source_tokens)
-        decoder_output, decoder_hidden = self.decoder(encoder_output, encoder_hidden, bos_token, decoder_inputs)
+        decoder_output, decoder_hidden, _ = self.decoder(encoder_output, encoder_hidden, decoder_inputs)
         return decoder_output
 
 if __name__ == '__main__':

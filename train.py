@@ -24,7 +24,7 @@ class CodeDocTrainer(BaseTrainer):
             decoder_input = decoder_input.to(self.device)
             decoder_output = decoder_output.to(self.device)
 
-            predict = self.model(source_tokens, self.bos_token, decoder_input)
+            predict = self.model(source_tokens, decoder_input)
             loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
             self.optimizer.zero_grad()
@@ -63,7 +63,7 @@ def main():
     # Configure sizes
     input_size = 8192
     output_size = 8192
-    batch_size = 64
+    batch_size = 256
     hidden_size = 64
     sequence_length = 256
 
@@ -100,7 +100,7 @@ def main():
     encoder_input_size = len(code_tokenizer)
     decoder_output_size = len(doc_tokenizer)
     encoder = model.encoder.RNNEncoder(encoder_input_size, hidden_size).to(device)
-    decoder = model.decoder.RNNDecoder(hidden_size, decoder_output_size).to(device)
+    decoder = model.decoder.RNNDecoder(hidden_size, decoder_output_size, code_tokenizer.bos_token).to(device)
     seq2seq = model.seq2seq.Seq2SeqModel(encoder, decoder).to(device)
 
     print(f'encoder_input_size: {encoder_input_size}')
@@ -108,7 +108,7 @@ def main():
 
     # Prepare Trainer
     trainer = CodeDocTrainer(
-        name='Code DocString Model',
+        name='RNN_Code2Doc_Model',
         model=seq2seq,
         optimizer=torch.optim.Adam(seq2seq.parameters(), lr=0.001),
         loss_fn=torch.nn.NLLLoss(),
@@ -120,6 +120,7 @@ def main():
 
     trainer.fit(
         epochs=20,
+        save_check_point = True,
         graph=True
     )
 
