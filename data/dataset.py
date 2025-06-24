@@ -112,16 +112,6 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
         max_code_token=max_code_token
     ))
 
-    # Load code token in tokenizer
-    for dataset in datasets.values():
-        for data in dataset:
-            code_tokenizer.update_tokens(data['func_code_tokens'])
-            doc_tokenizer.update_tokens(data['func_documentation_tokens'])
-    code_tokenizer.build_most_freq_tokens()
-    doc_tokenizer.build_most_freq_tokens()
-    print(f'Top 10 most frequent code: {code_tokenizer.counter.most_common(10)}')
-    print(f'Top 10 most frequent doc: {doc_tokenizer.counter.most_common(10)}')
-
     # only need func_code_tokens and func_documentation_tokens.
     columns_to_save = [
         'func_code_string',
@@ -131,9 +121,20 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
     ]
     _filter_columns_from_dataset(datasets, columns_to_save)
 
+    # Load tokens in tokenizer
+    for dataset in datasets.values():
+        for data in dataset:
+            code_tokenizer.update_tokens(data['func_code_tokens'])
+            doc_tokenizer.update_tokens(data['func_documentation_tokens'])
+    code_tokenizer.build_most_freq_tokens()
+    doc_tokenizer.build_most_freq_tokens()
+    print(f'code tokens: {len(code_tokenizer)}')
+    print(f'doc_tokens: {len(doc_tokenizer)}')
+
     # Tokenize datasets
     datasets = datasets.map(lambda example: _tokenize(example, code_tokenizer, doc_tokenizer))
 
+    # Save datasets and tokenizers to local disk. 
     datasets.save_to_disk(data_local_path)
     code_tokenizer.save_to_disk(data_local_path / CODE_TOKENIZER_JSON_STR)
     doc_tokenizer.save_to_disk(data_local_path / DOC_TOKENIZER_JSON_STR)

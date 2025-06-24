@@ -34,7 +34,7 @@ class CodeDocTrainer(BaseTrainer):
             train_loss += loss.item()
             if (batch + 1) % 64 == 0:
                 index = (batch + 1) * self.train_loader.batch_size
-                print(f'    loss: {loss.item()} ---- {index:5f} / {len(self.train_loader.dataset)}')
+                print(f'    loss: {loss.item(): .5f} ---- {index} / {len(self.train_loader.dataset)}')
         
         train_loss /= len(self.train_loader.dataset)
         return {'Train Loss': train_loss}
@@ -65,6 +65,7 @@ def main():
     output_size = 8192
     batch_size = 64
     hidden_size = 64
+    sequence_length = 256
 
     # Get datasets
     DATASET_LOCAL_PATH = Path(r'./preprocessed_dataset')
@@ -73,7 +74,7 @@ def main():
     train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path=DATASET_LOCAL_PATH,
                                                       code_tokenizer=code_tokenizer,
                                                       doc_tokenizer=doc_tokenizer,
-                                                      sequence_length=256)
+                                                      sequence_length=sequence_length)
 
     # Create data loaders
     train_loader = DataLoader(
