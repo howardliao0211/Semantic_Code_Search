@@ -34,10 +34,9 @@ class CodeDocTrainer(BaseTrainer):
 
             train_loss += loss.item()
             if (batch + 1) % 64 == 0:
-                index = (batch + 1) * self.train_loader.batch_size
-                print(f'    loss: {loss.item(): .5f} ---- {index} / {len(self.train_loader.dataset)}')
+                print(f'    loss: {loss.item(): .5f} ---- {batch + 1} / {len(self.train_loader)}')
         
-        train_loss /= len(self.train_loader.dataset)
+        train_loss /= len(self.train_loader)
         return {'Train Loss': train_loss}
     
     def test_loop(self):
@@ -54,9 +53,9 @@ class CodeDocTrainer(BaseTrainer):
                 loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
                 test_loss += loss.item()
 
-        test_loss /= len(self.test_loader.dataset)
+        test_loss /= len(self.test_loader)
         print(f'Test Loss: {test_loss:5f}')
-        
+
         return {'Test Loss': test_loss}
 
 def main():
