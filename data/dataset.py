@@ -29,8 +29,8 @@ class CodeDocDataset(Dataset):
         target_tokens = self._pad_or_trunc(target_tokens, self.sequence_length-1)
 
         encoder_input = source_tokens + [self.eos_token]
-        decoder_input = target_tokens + [self.eos_token]
-        decoder_output = [self.bos_token] + target_tokens
+        decoder_input = [self.bos_token] + target_tokens
+        decoder_output = target_tokens + [self.eos_token]
 
         encoder_input = torch.tensor(encoder_input, dtype=torch.int32)
         decoder_input = torch.tensor(decoder_input, dtype=torch.int32)

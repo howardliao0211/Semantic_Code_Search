@@ -98,11 +98,14 @@ class Tokenizer:
 
         return self.word2index.get(token, self.unk_token)
     
-    def to_word(self, index: int) -> str:
+    def to_word(self, index: int, skip_special_tokens: bool=False) -> str:
 
         if isinstance(index, list):
             return ' '.join([self.to_word(idx) for idx in index])
 
+        if index in (EOS_IDX, BOS_IDX, UNK_IDX, PAD_IDX):
+            return ''
+        
         return self.index2word.get(index, UNK_STR)
 
     def __len__(self) -> int:
