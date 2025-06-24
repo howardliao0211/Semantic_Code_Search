@@ -4,16 +4,20 @@ from pathlib import Path
 from torch.utils.data import DataLoader
 from trainers.core import BaseTrainer
 from dataclasses import dataclass
+import evaluate
 import model
 import torch
 import model.decoder
 import model.encoder
 import model.seq2seq
 
+bleu = evaluate.load('bleu')
+
 @dataclass
 class CodeDocTrainer(BaseTrainer):
 
     bos_token: int
+    doc_tokenizer: Tokenizer
 
     def train_loop(self):
         self.model.train()
@@ -43,6 +47,8 @@ class CodeDocTrainer(BaseTrainer):
         self.model.eval()
         
         test_loss = 0.0
+        references = []
+        predictions = []
 
         for source_tokens, _, decoder_output in self.test_loader:
             source_tokens = source_tokens.to(self.device)
@@ -52,18 +58,33 @@ class CodeDocTrainer(BaseTrainer):
                 predict = self.model(source_tokens)
                 loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
                 test_loss += loss.item()
+            
+                predictions.append(
+                    self.doc_tokenizer.to_word(torch.argmax(predict, dim=-1).tolist(), skip_special_tokens=True)
+                )
 
+                references.append(
+                    [
+                        self.doc_tokenizer.to_word(decoder_output.tolist(), skip_special_tokens=True)
+                    ]
+                )
+
+        # Compute test loss
         test_loss /= len(self.test_loader)
-        print(f'Test Loss: {test_loss:5f}')
 
-        return {'Test Loss': test_loss}
+        # Compute Bleu score based on the first sequence in the last batch
+        results = bleu.compute(predictions=predictions, references=references)
+
+        # Print Message
+        print(f'Test Loss: {test_loss:5f}, Bleu: {results['bleu']:.5f}')
+        return {'Test Loss': test_loss, 'Bleu': results['bleu']}
 
 def main():
 
     # Configure sizes
     input_size = 8192
     output_size = 8192
-    batch_size = 256
+    batch_size = 64
     hidden_size = 64
     sequence_length = 256
 
@@ -100,7 +121,7 @@ def main():
     encoder_input_size = len(code_tokenizer)
     decoder_output_size = len(doc_tokenizer)
     encoder = model.encoder.RNNEncoder(encoder_input_size, hidden_size).to(device)
-    decoder = model.decoder.RNNDecoder(hidden_size, decoder_output_size, code_tokenizer.bos_token).to(device)
+    decoder = model.decoder.RNNDecoder(hidden_size, decoder_output_size, code_tokenizer.bos_token, code_tokenizer.eos_token).to(device)
     seq2seq = model.seq2seq.Seq2SeqModel(encoder, decoder).to(device)
 
     print(f'encoder_input_size: {encoder_input_size}')
@@ -111,16 +132,17 @@ def main():
         name='RNN_Code2Doc_Model',
         model=seq2seq,
         optimizer=torch.optim.Adam(seq2seq.parameters(), lr=0.001),
-        loss_fn=torch.nn.NLLLoss(),
+        loss_fn=torch.nn.NLLLoss(ignore_index=code_tokenizer.pad_token),
         train_loader=train_loader,
         test_loader=test_loader,
         device=device,
-        bos_token=code_tokenizer.bos_token
+        bos_token=code_tokenizer.bos_token,
+        doc_tokenizer=doc_tokenizer
     )
 
     trainer.fit(
         epochs=20,
-        save_check_point = True,
+        save_check_point = False,
         graph=True
     )
 
