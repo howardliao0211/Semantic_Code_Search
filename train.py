@@ -16,7 +16,6 @@ bleu = evaluate.load('bleu')
 @dataclass
 class CodeDocTrainer(BaseTrainer):
 
-    bos_token: int
     doc_tokenizer: Tokenizer
 
     def train_loop(self):
@@ -84,7 +83,8 @@ def main():
     # Configure sizes
     input_size = 8192
     output_size = 8192
-    batch_size = 64
+    batch_size = 128
+    
     hidden_size = 64
     sequence_length = 256
 
@@ -121,7 +121,7 @@ def main():
     encoder_input_size = len(code_tokenizer)
     decoder_output_size = len(doc_tokenizer)
     encoder = model.encoder.RNNEncoder(encoder_input_size, hidden_size).to(device)
-    decoder = model.decoder.RNNDecoder(hidden_size, decoder_output_size, code_tokenizer.bos_token, code_tokenizer.eos_token).to(device)
+    decoder = model.decoder.BahdanauAttentionDecoder(hidden_size, decoder_output_size, code_tokenizer.bos_token, code_tokenizer.eos_token).to(device)
     seq2seq = model.seq2seq.Seq2SeqModel(encoder, decoder).to(device)
 
     print(f'encoder_input_size: {encoder_input_size}')
@@ -129,20 +129,19 @@ def main():
 
     # Prepare Trainer
     trainer = CodeDocTrainer(
-        name='RNN_Code2Doc_Model',
+        name='Attention_Code2Doc_Model',
         model=seq2seq,
         optimizer=torch.optim.Adam(seq2seq.parameters(), lr=0.001),
         loss_fn=torch.nn.NLLLoss(ignore_index=code_tokenizer.pad_token),
         train_loader=train_loader,
         test_loader=test_loader,
         device=device,
-        bos_token=code_tokenizer.bos_token,
         doc_tokenizer=doc_tokenizer
     )
 
     trainer.fit(
         epochs=20,
-        save_check_point = False,
+        save_check_point = True,
         graph=True
     )
 

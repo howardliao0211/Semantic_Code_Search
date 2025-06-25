@@ -1,16 +1,16 @@
 try:
     from .encoder import RNNEncoder
-    from .decoder import RNNDecoder
+    from .decoder import RNNDecoder, SequenceDecoder
 except ImportError:
     from encoder import RNNEncoder
-    from decoder import RNNDecoder
+    from decoder import RNNDecoder, SequenceDecoder
 from torch import nn
 import torch.nn.functional as F
 import torch
 
 class Seq2SeqModel(nn.Module):
 
-    def __init__(self, encoder: RNNEncoder, decoder: RNNDecoder):
+    def __init__(self, encoder: RNNEncoder, decoder: SequenceDecoder):
         super(Seq2SeqModel, self).__init__()
 
         self.encoder = encoder
@@ -18,7 +18,7 @@ class Seq2SeqModel(nn.Module):
     
     def forward(self, source_tokens, decoder_inputs = None) -> torch.Tensor:
         encoder_output, encoder_hidden = self.encoder(source_tokens)
-        decoder_output, decoder_hidden, _ = self.decoder(encoder_output, encoder_hidden, decoder_inputs)
+        decoder_output, decoder_hidden, attention_weights = self.decoder(encoder_output, encoder_hidden, decoder_inputs)
         return decoder_output
 
 if __name__ == '__main__':
