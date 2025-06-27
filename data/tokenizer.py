@@ -114,6 +114,21 @@ class Tokenizer:
                 return ''
         
         return self.index2word.get(index, UNK_STR)
+    
+    def to_word_batch(self, batched_indices) -> list[str]:
+        word_batch = []
+
+        for indices in batched_indices:
+            words = []
+            for idx in indices:
+                if idx in (EOS_IDX, PAD_IDX):  # stop at EOS or PAD
+                    break
+                if idx in (BOS_IDX, UNK_IDX):
+                    continue  # skip BOS and UNK in output
+                words.append(self.to_word(idx))
+            word_batch.append(' '.join(words))
+
+        return word_batch
 
     def __len__(self) -> int:
         return self.num

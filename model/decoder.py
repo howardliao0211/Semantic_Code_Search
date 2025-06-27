@@ -66,7 +66,7 @@ class RNNDecoder(nn.Module):
 
 class BahdanauAttentionDecoder(nn.Module):
     
-    def __init__(self, hidden_size, output_size, bos_token, eos_token, drop_p = 0.1):
+    def __init__(self, hidden_size, output_size, bos_token, eos_token, pad_token, drop_p = 0.1):
         super(BahdanauAttentionDecoder, self).__init__()
 
         self.attention = AdditiveAttention(query_size=hidden_size,
@@ -80,6 +80,7 @@ class BahdanauAttentionDecoder(nn.Module):
         self.dropout = nn.Dropout(drop_p)
         self.bos_token = bos_token
         self.eos_token = eos_token
+        self.pad_token = pad_token
     
     def forward(self, encoder_outputs: torch.Tensor, encoder_hidden: torch.Tensor, tgt_tensor: torch.Tensor|Any=None):
         batch_size, seq_size = encoder_outputs.size(0), encoder_outputs.size(1)
@@ -89,9 +90,10 @@ class BahdanauAttentionDecoder(nn.Module):
         attention_weights = []
         decoder_hidden = encoder_hidden
 
-        max_len = tgt_tensor.size(1) if tgt_tensor is not None else seq_size
+        # For tracking which sequences have generated EOS to pad after that
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=encoder_outputs.device)
 
-        for seq_idx in range(max_len):
+        for seq_idx in range(seq_size):
             decoder_output, decoder_hidden, attention_weight = self._forward_step(
                 decoder_input, decoder_hidden, encoder_outputs
             )
@@ -111,10 +113,27 @@ class BahdanauAttentionDecoder(nn.Module):
                 # need to detach so that gradient will not explode or vanish.
                 decoder_input = out_idx.squeeze(-1).detach()
 
-                # If the model predict eos_token, then stop predicting.
-                if (decoder_input == self.eos_token).all():
+                # Mark sequences where EOS is predicted
+                finished = finished | (decoder_input.squeeze(1) == self.eos_token)
+
+                # If all sequences finished, break early
+                if finished.all():
+                    # If we stopped early, pad the remaining steps
                     break
         
+        # If stopped early (less than max_len), pad outputs to max_len
+        current_len = len(decoder_outputs)
+        if current_len < seq_size:
+            pad_length = seq_size - current_len
+            # Create padding tensors
+            pad_output = torch.zeros(batch_size, 1, decoder_outputs[0].size(-1), device=encoder_outputs.device)
+            pad_attention = torch.zeros(batch_size, 1, attention_weights[0].size(-1), device=encoder_outputs.device)
+
+            # Append padding for remaining steps
+            for _ in range(pad_length):
+                decoder_outputs.append(pad_output)
+                attention_weights.append(pad_attention)
+
         # decoder_outputs will be a list of tensor with shape (batch, 1, output_size)
         decoder_outputs = torch.cat(decoder_outputs, dim=1)
         attention_weights = torch.cat(attention_weights, dim=1) # (batch, # of layer, # of seq)
