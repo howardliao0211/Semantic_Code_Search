@@ -57,7 +57,7 @@ def readLangs(lang1, lang2, reverse=False):
     print("Reading lines...")
 
     # Read the file and split into lines
-    lines = open('data/french/%s-%s.txt' % (lang1, lang2), encoding='utf-8').\
+    lines = open(r'C:\Code\Code_Semantic_Search\data\french\eng-fra.txt', encoding='utf-8').\
         read().strip().split('\n')
 
     # Split every line into pairs and normalize

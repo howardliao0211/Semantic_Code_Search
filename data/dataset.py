@@ -3,6 +3,7 @@ from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from typing import Any
 from .tokenizer import Tokenizer
+import random
 import pathlib
 import torch
 
@@ -13,7 +14,7 @@ class CodeDocDataset(Dataset):
 
         # Use int to represent the index. 
         self.dataset = dataset
-        self.sequence_length = sequence_length
+        self.sequence_length = sequence_length + 1 # plus 1 for bos / eos
         self.eos_token = eos_token
         self.bos_token = bos_token
         self.pad_token = pad_token
@@ -25,8 +26,8 @@ class CodeDocDataset(Dataset):
         source_tokens = self.dataset[index]['func_code_tokens']
         target_tokens = self.dataset[index]['func_documentation_tokens']
         
-        source_tokens = self._pad_or_trunc(source_tokens, self.sequence_length-1)
-        target_tokens = self._pad_or_trunc(target_tokens, self.sequence_length-1)
+        source_tokens = self._pad_or_trunc(source_tokens, self.sequence_length)
+        target_tokens = self._pad_or_trunc(target_tokens, self.sequence_length)
 
         encoder_input = source_tokens + [self.eos_token]
         decoder_input = [self.bos_token] + target_tokens
@@ -37,6 +38,16 @@ class CodeDocDataset(Dataset):
         decoder_output = torch.LongTensor(decoder_output)
 
         return (encoder_input, decoder_input, decoder_output)
+    
+    def show_triplets(self, num: int, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> None:
+        for i in range(num):
+            index = random.randint(0, len(self) - 1)
+            encoder_input, decoder_input, decoder_output = self[index]
+            print(f'#{i}')
+            print(f'    encoder_input:  {code_tokenizer.to_word(encoder_input.tolist())}')
+            print(f'    decoder_input:  {doc_tokenizer.to_word(decoder_input.tolist())}')
+            print(f'    decoder_output: {doc_tokenizer.to_word(decoder_output.tolist())}')
+        
 
     def _pad_or_trunc(self, tokens: list[str], sequence_length: int) -> list[str]:
         if len(tokens) > sequence_length:
@@ -85,6 +96,20 @@ def _filter_columns_from_dataset(datasets, columns_to_save: list):
     # Remove all the columns except columns_to_save.
     for dataset in datasets:
         datasets[dataset] = datasets[dataset].remove_columns(dataset_columns_to_remove[dataset])
+    
+    return datasets
+
+# filter the dataset to only include allow code tokens and allow documentation tokens
+# so that the dataset will not have any unknown token
+def _filter_tokens(ds, allow_code_tokens, allow_doc_tokens) -> bool:
+    for code_token, doc_token in zip(ds['func_code_tokens'], ds['func_documentation_tokens']):
+        if code_token not in allow_code_tokens:
+            return False
+
+        if doc_token not in allow_doc_tokens:
+            return False
+
+    return True
 
 def _tokenize(example, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> int:
     return {
@@ -98,11 +123,13 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
     DOC_TOKENIZER_JSON_STR = 'doc_tokenizer_json.json'
 
     if data_local_path.exists():
+        print(f'Loading preprocessed dataset...')
         code_tokenizer.load_from_disk(data_local_path / CODE_TOKENIZER_JSON_STR)
         doc_tokenizer.load_from_disk(data_local_path / DOC_TOKENIZER_JSON_STR)
         return load_from_disk(data_local_path)
 
     # dataset is splitted into train, valid, and test
+    print('Filtering dataset with token size...')
     datasets = load_dataset("code_search_net", "python", trust_remote_code=True)
     datasets = datasets.filter(lambda ds: _filter_dataset(
         ds=ds,
@@ -113,28 +140,35 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
     ))
 
     # only need func_code_tokens and func_documentation_tokens.
+    print('Filtering dataset with columns to save')
     columns_to_save = [
         'func_code_string',
         'func_code_tokens',
         'func_documentation_string',
         'func_documentation_tokens'
     ]
-    _filter_columns_from_dataset(datasets, columns_to_save)
+    datasets = _filter_columns_from_dataset(datasets, columns_to_save)
 
     # Load tokens in tokenizer
-    for dataset in datasets.values():
-        for data in dataset:
-            code_tokenizer.update_tokens(data['func_code_tokens'])
-            doc_tokenizer.update_tokens(data['func_documentation_tokens'])
-    code_tokenizer.build_most_freq_tokens()
-    doc_tokenizer.build_most_freq_tokens()
+    code_tokenizer.load_datasets(datasets, 'func_code_tokens')
+    doc_tokenizer.load_datasets(datasets, 'func_documentation_tokens')
     print(f'code tokens: {len(code_tokenizer)}')
     print(f'doc_tokens: {len(doc_tokenizer)}')
 
+    # Filter the dataset to only include data with recognizable tokens
+    print('Filtering dataset with allow tokens...')
+    datasets = datasets.filter(
+        lambda example: _filter_tokens(ds=example,
+                                       allow_code_tokens=code_tokenizer.most_freq_tokens,
+                                       allow_doc_tokens=doc_tokenizer.most_freq_tokens)
+    )
+
     # Tokenize datasets
+    print('Tokenizing dataset...')
     datasets = datasets.map(lambda example: _tokenize(example, code_tokenizer, doc_tokenizer))
 
     # Save datasets and tokenizers to local disk. 
+    print('Saving dataset to disk...')
     datasets.save_to_disk(data_local_path)
     code_tokenizer.save_to_disk(data_local_path / CODE_TOKENIZER_JSON_STR)
     doc_tokenizer.save_to_disk(data_local_path / DOC_TOKENIZER_JSON_STR)
@@ -142,13 +176,25 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
     return datasets
 
 
-def get_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, sequence_length=256, min_doc_token=0, max_doc_token=256, min_code_token=0, max_code_token=256):
+def get_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, sequence_length: int):
     eos_token, bos_token, pad_token = code_tokenizer.eos_token, code_tokenizer.bos_token, code_tokenizer.pad_token
 
-    datasets = _prepare_datasets_and_tokenizers(data_local_path, code_tokenizer, doc_tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token)
+    datasets = _prepare_datasets_and_tokenizers(
+        data_local_path=data_local_path,
+        code_tokenizer=code_tokenizer,
+        doc_tokenizer=doc_tokenizer,
+        min_doc_token=0,
+        max_doc_token=sequence_length,
+        min_code_token=0,
+        max_code_token=sequence_length
+    )
     train_dataset = CodeDocDataset(datasets['train'], sequence_length, eos_token, bos_token, pad_token)
     test_dataset = CodeDocDataset(datasets['test'], sequence_length, eos_token, bos_token, pad_token)
     validation_dataset = CodeDocDataset(datasets['validation'], sequence_length, eos_token, bos_token, pad_token)
+
+    print(f'Train Dataset Size: {len(train_dataset)}')
+    print(f'Test Dataset Size: {len(test_dataset)}')
+    print(f'Validation Dataset Size: {len(validation_dataset)}')
 
     return train_dataset, test_dataset, validation_dataset
 

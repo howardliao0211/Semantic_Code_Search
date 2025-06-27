@@ -78,10 +78,16 @@ class Tokenizer:
     def unk_token(self) -> int:
         return UNK_IDX
     
-    def update_tokens(self, tokens: list[str]):
+    def load_datasets(self, datasets, key):
+        for dataset in datasets.values():
+            for data in dataset:
+                self._update_tokens(data[key])
+        self._build_most_freq_tokens()
+
+    def _update_tokens(self, tokens: list[str]):
         self.counter.update(tokens)
 
-    def build_most_freq_tokens(self):
+    def _build_most_freq_tokens(self):
         # Build the most freq tokens from the most frequent tokens
         self.most_freq_tokens = {word for word, freq in self.counter.most_common(self.topk_freq)}
 
@@ -98,13 +104,14 @@ class Tokenizer:
 
         return self.word2index.get(token, self.unk_token)
     
-    def to_word(self, index: int, skip_special_tokens: bool=False) -> str:
+    def to_word(self, index: int, skip_special_tokens: bool=True) -> str:
 
         if isinstance(index, list):
             return ' '.join([self.to_word(idx) for idx in index])
 
-        if index in (EOS_IDX, BOS_IDX, UNK_IDX, PAD_IDX):
-            return ''
+        if skip_special_tokens:
+            if index in (EOS_IDX, BOS_IDX, UNK_IDX, PAD_IDX):
+                return ''
         
         return self.index2word.get(index, UNK_STR)
 
@@ -136,16 +143,16 @@ class Tokenizer:
 
 if __name__ == '__main__':
     tokenizer = Tokenizer(size=100)
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e a nonsense e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
-    tokenizer.update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad sentence'.split())
-    tokenizer.build_most_freq_tokens()
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e a nonsense e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
+    tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad sentence'.split())
+    tokenizer._build_most_freq_tokens()
 
     tokens = tokenizer.to_idx('this is a nonsense sentence'.split())
     print(tokenizer.to_word(tokens))
