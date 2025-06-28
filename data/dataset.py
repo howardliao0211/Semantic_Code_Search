@@ -3,6 +3,8 @@ from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from typing import Any
 from .tokenizer import Tokenizer
+import re
+import unicodedata
 import random
 import pathlib
 import torch
@@ -111,11 +113,27 @@ def _filter_tokens(ds, allow_code_tokens, allow_doc_tokens) -> bool:
 
     return True
 
-def _tokenize(example, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> int:
+def _tokenize(example, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> dict:
     return {
         'func_code_tokens': code_tokenizer.to_idx(example['func_code_tokens']),
         'func_documentation_tokens': doc_tokenizer.to_idx(example['func_documentation_tokens']),
     }
+
+def _unicode_to_ascii(s):
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', s)
+        if unicodedata.category(c) != 'Mn'
+    )
+
+# Lowercase, trim, and remove non-letter characters
+def _normalize_string(s):
+    s = _unicode_to_ascii(s.lower().strip())
+    s = re.sub(r"([.!?])", r" \1", s)
+    s = re.sub(r"[^a-zA-Z!?]+", r" ", s)
+    return s.strip()
+
+def preprocess_documentation_string_to_tokens(s):
+    return _normalize_string(s).split()
 
 def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token):
 
@@ -128,9 +146,18 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
         doc_tokenizer.load_from_disk(data_local_path / DOC_TOKENIZER_JSON_STR)
         return load_from_disk(data_local_path)
 
+    datasets = load_dataset("code_search_net", "python", trust_remote_code=True)
+
+    # Normalize the documentation string.
+    print(f'Creating function documentation tokens...')
+    datasets = datasets.map(
+        lambda example: {
+            'func_documentation_tokens': preprocess_documentation_string_to_tokens(example['func_documentation_string'])
+        }
+    )
+
     # dataset is splitted into train, valid, and test
     print('Filtering dataset with token size...')
-    datasets = load_dataset("code_search_net", "python", trust_remote_code=True)
     datasets = datasets.filter(lambda ds: _filter_dataset(
         ds=ds,
         min_doc_token=min_doc_token,
