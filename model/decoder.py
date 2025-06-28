@@ -137,7 +137,9 @@ class BahdanauAttentionDecoder(nn.Module):
         # decoder_outputs will be a list of tensor with shape (batch, 1, output_size)
         decoder_outputs = torch.cat(decoder_outputs, dim=1)
         attention_weights = torch.cat(attention_weights, dim=1) # (batch, # of layer, # of seq)
-        decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
+        
+        # Apply softmax at loss function.
+        # decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
         
         # Append a None so that the output of the decoder would be the same as the attention decoder. 
         return decoder_outputs, decoder_hidden, attention_weights

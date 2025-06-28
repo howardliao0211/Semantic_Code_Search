@@ -154,6 +154,7 @@ def main():
     dropout_p = 0.3
     weight_decay = 1e-5
     learning_rate = 5e-4
+    label_smoothing = 0.1
 
     # Get datasets
     DATASET_LOCAL_PATH = Path(r'./preprocessed_dataset')
@@ -183,14 +184,19 @@ def main():
         shuffle=False
     )
 
-    train_dataset.show_triplets(10, code_tokenizer, doc_tokenizer)
+    train_dataset.show_triplets(3, code_tokenizer, doc_tokenizer)
 
     # Prepare model
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     encoder_input_size = len(code_tokenizer)
     decoder_output_size = len(doc_tokenizer)
     encoder = model.encoder.RNNEncoder(encoder_input_size, hidden_size, dropout_p=dropout_p).to(device)
-    decoder = model.decoder.BahdanauAttentionDecoder(hidden_size, decoder_output_size, code_tokenizer.bos_token, code_tokenizer.eos_token, code_tokenizer.pad_token, drop_p=dropout_p).to(device)
+    decoder = model.decoder.BahdanauAttentionDecoder(hidden_size,
+                                                     decoder_output_size,
+                                                     code_tokenizer.bos_token,
+                                                     code_tokenizer.eos_token,
+                                                     code_tokenizer.pad_token,
+                                                     drop_p=dropout_p).to(device)
     seq2seq = model.seq2seq.Seq2SeqModel(encoder, decoder).to(device)
 
     print(f'encoder_input_size: {encoder_input_size}')
@@ -201,7 +207,7 @@ def main():
         name='Attention_Code2Doc_Model',
         model=seq2seq,
         optimizer=torch.optim.Adam(seq2seq.parameters(), lr=learning_rate, weight_decay=weight_decay),
-        loss_fn=torch.nn.NLLLoss(ignore_index=code_tokenizer.pad_token),
+        loss_fn=torch.nn.CrossEntropyLoss(ignore_index=code_tokenizer.pad_token, label_smoothing=label_smoothing),
         train_loader=train_loader,
         test_loader=test_loader,
         device=device,
@@ -209,7 +215,7 @@ def main():
     )
 
     trainer.fit(
-        epochs=200,
+        epochs=50,
         save_check_point = True,
         graph=True
     )
