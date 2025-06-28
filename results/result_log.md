@@ -1,3 +1,9 @@
+# 2025_0628_3 - Applied class weighting
+![](Attention_Decoder_2025_0628_3.png)
+--- 
+- Model not overfitting at the first ~30 epochs but overfitting emerge afterward.
+---
+
 # 2025_0628_2 - Implemented label smoothing to solve overfitting
 ![](Attention_Decoder_2025_0628_2.png)
 --- 

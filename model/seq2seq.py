@@ -15,11 +15,17 @@ class Seq2SeqModel(nn.Module):
 
         self.encoder = encoder
         self.decoder = decoder
+        self.apply(self._init_weights)
     
     def forward(self, source_tokens, decoder_inputs = None) -> torch.Tensor:
         encoder_output, encoder_hidden = self.encoder(source_tokens)
         decoder_output, decoder_hidden, attention_weights = self.decoder(encoder_output, encoder_hidden, decoder_inputs)
         return decoder_output
+    
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            m.bias.data.fill_(0.01)
 
 if __name__ == '__main__':
     input_size, hidden_size = 1024, 64

@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from trainers.core import BaseTrainer
 from trainers.utils import graph_loss_animation_start, graph_loss_animation_update, graph_loss_animation_end, load_checkpoint
 from dataclasses import dataclass
+import math
 import datetime
 import evaluate
 import model
@@ -143,6 +144,16 @@ class CodeDocTrainer(BaseTrainer):
         print(f"Reference : {references[rand_idx][0]}")
         return {'Test Loss': test_loss, 'Bleu': results['bleu']}
 
+def get_class_weight_vector(tokenizer: Tokenizer) -> torch.Tensor:
+    num_of_class = len(tokenizer)
+    weight_vector = torch.ones(num_of_class, dtype=torch.float)
+    
+    for word, count in tokenizer.counter.items():
+        idx = tokenizer.to_idx(word)
+        weight_vector[idx] = 1.0 / math.log(count + math.e)
+    
+    return weight_vector / weight_vector.sum() # normalize weight
+
 def main():
 
     # Configure hyperparameters
@@ -199,6 +210,13 @@ def main():
                                                      drop_p=dropout_p).to(device)
     seq2seq = model.seq2seq.Seq2SeqModel(encoder, decoder).to(device)
 
+    # # Get class weight
+    class_weight = get_class_weight_vector(doc_tokenizer).to(device)
+
+    # Optimizer and Loss Function
+    optimizer = torch.optim.Adam(seq2seq.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=code_tokenizer.pad_token, label_smoothing=label_smoothing, weight=class_weight)
+
     print(f'encoder_input_size: {encoder_input_size}')
     print(f'decoder_output_size: {decoder_output_size}')
 
@@ -206,8 +224,8 @@ def main():
     trainer = CodeDocTrainer(
         name='Attention_Code2Doc_Model',
         model=seq2seq,
-        optimizer=torch.optim.Adam(seq2seq.parameters(), lr=learning_rate, weight_decay=weight_decay),
-        loss_fn=torch.nn.CrossEntropyLoss(ignore_index=code_tokenizer.pad_token, label_smoothing=label_smoothing),
+        optimizer=optimizer,
+        loss_fn=loss_fn,
         train_loader=train_loader,
         test_loader=test_loader,
         device=device,
