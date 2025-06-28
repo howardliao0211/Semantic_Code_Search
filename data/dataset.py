@@ -16,7 +16,7 @@ class CodeDocDataset(Dataset):
 
         # Use int to represent the index. 
         self.dataset = dataset
-        self.sequence_length = sequence_length + 1 # plus 1 for bos / eos
+        self.sequence_length = sequence_length
         self.eos_token = eos_token
         self.bos_token = bos_token
         self.pad_token = pad_token
