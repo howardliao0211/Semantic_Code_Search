@@ -27,7 +27,7 @@ class CodeDocDataset(Dataset):
     def __getitem__(self, index):
         source_tokens = self.dataset[index]['func_code_tokens']
         target_tokens = self.dataset[index]['func_documentation_tokens']
-        
+
         encoder_input = source_tokens + [self.eos_token]
         decoder_input = [self.bos_token] + target_tokens
         decoder_output = target_tokens + [self.eos_token]
@@ -104,10 +104,11 @@ def _filter_columns_from_dataset(datasets, columns_to_save: list):
 # filter the dataset to only include allow code tokens and allow documentation tokens
 # so that the dataset will not have any unknown token
 def _filter_tokens(ds, allow_code_tokens, allow_doc_tokens) -> bool:
-    for code_token, doc_token in zip(ds['func_code_tokens'], ds['func_documentation_tokens']):
+    for code_token in ds['func_code_tokens']:
         if code_token not in allow_code_tokens:
             return False
 
+    for doc_token in ds['func_documentation_tokens']:
         if doc_token not in allow_doc_tokens:
             return False
 
@@ -211,9 +212,9 @@ def get_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer
         code_tokenizer=code_tokenizer,
         doc_tokenizer=doc_tokenizer,
         min_doc_token=0,
-        max_doc_token=sequence_length,
+        max_doc_token=sequence_length - 1, # preserve one space for eos/bos
         min_code_token=0,
-        max_code_token=sequence_length
+        max_code_token=sequence_length - 1 # preserve one space for eos/bos
     )
     train_dataset = CodeDocDataset(datasets['train'], sequence_length, eos_token, bos_token, pad_token)
     test_dataset = CodeDocDataset(datasets['test'], sequence_length, eos_token, bos_token, pad_token)

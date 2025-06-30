@@ -174,7 +174,7 @@ def main():
     train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path=DATASET_LOCAL_PATH,
                                                       code_tokenizer=code_tokenizer,
                                                       doc_tokenizer=doc_tokenizer,
-                                                      sequence_length=sequence_length - 1) # preserve one space for eos/bos
+                                                      sequence_length=sequence_length)
 
     # Create data loaders
     train_loader = DataLoader(

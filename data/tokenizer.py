@@ -82,12 +82,12 @@ class Tokenizer:
         for dataset in datasets.values():
             for data in dataset:
                 self._update_tokens(data[key])
-        self._build_most_freq_tokens()
+        self._build_vocab()
 
     def _update_tokens(self, tokens: list[str]):
         self.counter.update(tokens)
 
-    def _build_most_freq_tokens(self):
+    def _build_vocab(self):
         # Build the most freq tokens from the most frequent tokens
         self.most_freq_tokens = {word for word, freq in self.counter.most_common(self.topk_freq)}
 
@@ -107,7 +107,7 @@ class Tokenizer:
     def to_word(self, index: int, skip_special_tokens: bool=True) -> str:
 
         if isinstance(index, list):
-            return ' '.join([self.to_word(idx) for idx in index])
+            return ' '.join([self.to_word(idx, skip_special_tokens) for idx in index if self.to_word(idx, skip_special_tokens)])
 
         if skip_special_tokens:
             if index in (EOS_IDX, BOS_IDX, UNK_IDX, PAD_IDX):
@@ -167,7 +167,7 @@ if __name__ == '__main__':
     tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
     tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad '.split())
     tokenizer._update_tokens('I am testing this is as;dlkfj asdfsa e e sdfasdf eeee csakjdfsad sentence'.split())
-    tokenizer._build_most_freq_tokens()
+    tokenizer._build_vocab()
 
     tokens = tokenizer.to_idx('this is a nonsense sentence'.split())
     print(tokenizer.to_word(tokens))
