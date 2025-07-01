@@ -1,119 +1,72 @@
-# 🧠 CodeSearchNet Replica Project Roadmap
+# Semantic Code Search
 
-This guide walks through the major and minor milestones required to build a replica of the CodeSearchNet project, from setup to deployment.
+## Project Summary
 
----
+A hands-on implementation of **semantic code search** using deep learning. Inspired by GitHub’s CodeSearchNet, this project builds a neural search engine that retrieves the most relevant code snippets for a given natural language query. For example, for the query **"Create a sorted list"**, the model returns suggestions like: `sorted(list)`, `list.sort()`, and other semantically similar code examples. This project was built for learning purposes to deepen understanding of **Transformer-based architectures** and their application in **natural language and code representation**.
+## Resources
 
-## ✅ Project Goal
+- **CodeSearchNet by GitHub**: [https://wandb.ai/github/codesearchnet/benchmark](https://wandb.ai/github/codesearchnet/benchmark)  
+- **HuggingFace CodeSearchNet Dataset**: [https://huggingface.co/datasets/code-search-net/code_search_net](https://huggingface.co/datasets/code-search-net/code_search_net)  
+- **GitHub Blog — Towards Natural Language Semantic Code Search**: [https://github.blog/ai-and-ml/machine-learning/towards-natural-language-semantic-code-search/](https://github.blog/ai-and-ml/machine-learning/towards-natural-language-semantic-code-search/)
 
-Build a system that can take a natural language query and return the most relevant code snippet, replicating the functionality of CodeSearchNet.
+## Major Milestones
+[ ] **Constructe a sequence-to-squence model from code and documentation pairs**
 
----
+[ ] **Built a general purpose text encoder**
 
-## 🧱 Milestone 1: Project Setup and Dataset Preparation
+[ ] **Train the model to map code into a shared embedding space with natural language description**
 
-### Minor Steps:
+[ ] **Create frontend and backend for model deployment (Optional)**
 
-- [x] **Set up environment**
-  - Create a Python virtual environment.
-  - Install dependencies: `transformers`, `datasets`, `torch`, `scikit-learn`, etc.
+## Development Log
 
-- [x] **Download and explore the dataset**
-  - Use:
-    ```python
-    from datasets import load_dataset
-    ds = load_dataset("code_search_net", "python")
-    ```
-  - Explore fields like `code`, `docstring`, and `func_name`.
+### 2025_0628_3 — Applied Class Weighting
 
-- [x] **Clean and preprocess data**
-  - Normalize whitespaces and case.
-  - Filter out unusually short or long entries.
-  - Tokenize both code and natural language using a transformer tokenizer.
+![Result](./results/Attention_Decoder_2025_0628_3.png)
+
+- The model shows no signs of overfitting during the first ~30 epochs.
+- Overfitting begins to emerge afterward.
 
 ---
 
-## 📖 Milestone 2: Embedding and Modeling
+### 2025_0628_2 — Implemented Label Smoothing
 
-### Minor Steps:
+![Result](./results/Attention_Decoder_2025_0628_2.png)
 
-- [ ] **Build a easy baseline model**
-  - Use GRU to build an easy sequence to sequence model.
-
-- [ ] **Implement contrastive/triplet loss**
-  - E.g., cosine similarity with margin-based loss or InfoNCE.
-
-- [ ] **Train the model**
-  - Train and validate on subsets.
-  - Track loss and retrieval performance.
-  - Valid function with baseline model
-
-- [ ] **Create attention-based encoder and decoder**
-  - Implement attention-based encoder and decoder.
-  - Expect to see improvement on prediction accurarcy.
-
-- [ ] **Create query and code encoders**
-  - Build dual encoders for natural language and code inputs.
+- Added label smoothing to mitigate overfitting.
+- Overfitting was reduced in the first ~10 epochs, but signs reappeared later.
+- The model still tends to overuse frequent tokens to minimize loss.
+- **Potential Solutions**:
+  1. Apply class weighting to penalize frequent tokens.
+  2. Use a substring-based tokenizer to preserve semantics of rare tokens.
 
 ---
 
-## 🔍 Milestone 3: Code Search and Evaluation
+### 2025_0628 — Early Overfitting Mitigation Techniques
 
-### Minor Steps:
+![Result](./results/Attention_Decoder_2025_0628.png)
 
-- [ ] **Generate code embeddings**
-  - Cache embeddings for fast lookup.
-
-- [ ] **Embed the query and compute similarity**
-  - Use cosine or dot-product similarity.
-
-- [ ] **Rank code snippets**
-  - Sort based on similarity scores and return top-K results.
-
-- [ ] **Evaluate**
-  - Use metrics: MRR, Recall@1/5/10.
+- Applied weight decay.
+- Adjusted the teacher forcing ratio.
+- Tuned dropout rate and learning rate.
+- Overfitting still observed despite these interventions.
 
 ---
 
-## 🧪 Milestone 4: Optimization and Scaling
+### 2025_0627 — Seq2Seq on Code-to-Documentation Dataset
 
-### Minor Steps:
+![Result](./results/Attention_Decoder_2025_0627.png)
 
-- [ ] **Use FAISS for fast search**
-  - Index code embeddings with FAISS.
-  - Perform ANN (approximate nearest neighbor) search.
-
-- [ ] **Improve model**
-  - Use more advanced models like GraphCodeBERT or CodeT5.
-  - Apply hard negative mining.
-
-- [ ] **Experiment tracking**
-  - Use `wandb`, `mlflow`, or `tensorboard`.
+- Overfitting observed during training.
+- The model leans heavily on frequent tokens to reduce training loss.
 
 ---
 
-## 🌐 Milestone 5: Web Interface (Optional)
+### 2025_0627 — Seq2Seq on French-to-English Dataset
 
-### Minor Steps:
+![Result](./results/Seq2Seq_Model_on_French2English_Dataset.png)
 
-- [ ] **Create frontend UI**
-  - Use `Streamlit`, `Flask`, or a basic HTML/JS app.
-
-- [ ] **Backend model integration**
-  - Accept user queries → embed → search → return ranked code results.
+- Implemented a sequence-to-sequence model using an RNN encoder and a decoder with additive attention and RNN.
+- Successfully validated model performance on a basic English-to-French translation task.
 
 ---
-
-## 📁 Suggested Folder Structure
-
-```
-codesearchnet-replica/
-├── data/                  # dataset loading and cleaning
-├── models/                # model definition and training
-├── retrieval/             # similarity computation and search
-├── app/                   # optional web interface
-├── utils/                 # helper functions
-├── notebooks/             # analysis and testing
-├── config.yaml            # training configs
-└── train.py               # training entry point
-```
