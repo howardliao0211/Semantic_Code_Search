@@ -131,13 +131,11 @@ def _normalize_string(s):
     s = _unicode_to_ascii(s.lower().strip())
     s = re.sub(r"([.!?])", r" \1", s)
     s = re.sub(r"[^a-zA-Z!?]+", r" ", s)
-    return s.strip()
-
-def preprocess_documentation_string_to_tokens(s):
-    return _normalize_string(s).split()
+    return s.strip().split()
 
 def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, min_doc_token, max_doc_token, min_code_token, max_code_token):
 
+    num_process = 4
     CODE_TOKENIZER_JSON_STR = 'code_tokenizer_json.json'
     DOC_TOKENIZER_JSON_STR = 'doc_tokenizer_json.json'
 
@@ -150,11 +148,13 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
     datasets = load_dataset("code_search_net", "python", trust_remote_code=True)
 
     # Normalize the documentation string.
-    print(f'Creating function documentation tokens...')
+    print(f'Creating function tokens...')
     datasets = datasets.map(
         lambda example: {
-            'func_documentation_tokens': preprocess_documentation_string_to_tokens(example['func_documentation_string'])
-        }
+            'func_documentation_tokens': _normalize_string(example['func_documentation_string']),
+            # 'func_code_tokens': _normalize_string(example['func_code_string'])
+        },
+        num_proc=num_process
     )
 
     # dataset is splitted into train, valid, and test
@@ -164,8 +164,9 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
         min_doc_token=min_doc_token,
         max_doc_token=max_doc_token,
         min_code_token=min_code_token,
-        max_code_token=max_code_token
-    ))
+        max_code_token=max_code_token),
+        num_proc=num_process
+    )
 
     # only need func_code_tokens and func_documentation_tokens.
     print('Filtering dataset with columns to save')
@@ -188,12 +189,16 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
     datasets = datasets.filter(
         lambda example: _filter_tokens(ds=example,
                                        allow_code_tokens=code_tokenizer.most_freq_tokens,
-                                       allow_doc_tokens=doc_tokenizer.most_freq_tokens)
+                                       allow_doc_tokens=doc_tokenizer.most_freq_tokens),
+        num_proc=num_process
     )
 
     # Tokenize datasets
     print('Tokenizing dataset...')
-    datasets = datasets.map(lambda example: _tokenize(example, code_tokenizer, doc_tokenizer))
+    datasets = datasets.map(
+        lambda example: _tokenize(example, code_tokenizer, doc_tokenizer),
+        num_proc=num_process
+    )
 
     # Save datasets and tokenizers to local disk. 
     print('Saving dataset to disk...')
