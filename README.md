@@ -19,6 +19,17 @@ A hands-on implementation of **semantic code search** using deep learning. Inspi
 [ ] **Create frontend and backend for model deployment (Optional)**
 
 ## Development Log
+### 2025_0709 — Implemented the Transformer Architecture
+
+![Result](resources/Transformer.png)
+
+- Implemented the Transformer encoder and decoder.
+- Training time is too long. 
+- **Potential Solutions**:
+  1. Study torch optimization for transformers.
+  2. Use huggingface API for transformers.
+
+---
 
 ### 2025_0628_3 — Applied Class Weighting
 
@@ -26,16 +37,6 @@ A hands-on implementation of **semantic code search** using deep learning. Inspi
 
 - The model shows no signs of overfitting during the first ~30 epochs.
 - Overfitting begins to emerge afterward.
-
----
-
-### 2025_0709 — Implemented the Transformer Architecture
-
-- Implemented the Transformer encoder and decoder.
-- Training time is too long. 
-- **Potential Solutions**:
-  1. Study torch optimization for transformers.
-  2. Use huggingface API for transformers.
 
 ---
 
