@@ -29,6 +29,16 @@ A hands-on implementation of **semantic code search** using deep learning. Inspi
 
 ---
 
+### 2025_0628_2 — Implemented the Transformer Architecture
+
+- Implemented the Transformer encoder and decoder.
+- Training time is too long. 
+- **Potential Solutions**:
+  1. Study torch optimization for transformers.
+  2. Use huggingface API for transformers.
+
+---
+
 ### 2025_0628_2 — Implemented Label Smoothing
 
 ![Result](./results/Attention_Decoder_2025_0628_2.png)
