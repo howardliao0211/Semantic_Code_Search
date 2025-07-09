@@ -40,7 +40,7 @@ class CodeDocDataset(Dataset):
         decoder_input = torch.tensor(decoder_input, dtype=torch.int32)
         decoder_output = torch.LongTensor(decoder_output)
 
-        return (encoder_input, decoder_input, decoder_output)
+        return encoder_input, decoder_input, decoder_output
     
     def show_triplets(self, num: int, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> None:
         for i in range(num):

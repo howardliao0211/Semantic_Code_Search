@@ -10,6 +10,7 @@ import datetime
 import evaluate
 import model
 import torch
+import model.transformer
 import model.decoder
 import model.encoder
 import model.seq2seq
@@ -21,74 +22,52 @@ bleu = evaluate.load('bleu')
 @dataclass
 class CodeDocTrainer(BaseTrainer):
 
+    model: model.transformer.Transformer
     doc_tokenizer: Tokenizer
+    train_epoch: int = 0
 
-    def fit(self, epochs: int, trained_epochs: int=0, graph: bool=False, save_check_point: bool=False) -> None:
-        """
-        Train the model and optionally plot loss in real-time.
-        
-        Args:
-            epochs (int): Number of training epochs.
-        """
+    def fit(self, epochs, trained_epochs = 0, graph = False, save_check_point = False):
+        self.train_epoch = 0
+        return super().fit(epochs, trained_epochs, graph, save_check_point)
 
-        if graph:
-            fig, ax, lines, x_data, y_data = None, None, None, None, None
+    def train_loop(self):
+        teacher_forcing_ratio = max(0.5 - self.train_epoch * 0.02, 0.1)
+        use_teacher = random.random() < teacher_forcing_ratio
+        print(f'Use Teacher Forcing: {use_teacher}')
+        self.train_epoch += 1
 
-        print("Training the model...")
-        for epoch in range(epochs):
-            epoch_idx = epoch + trained_epochs + 1
-
-            print(f'============ Epoch {epoch_idx}/{epochs + trained_epochs} ============')
-
-            teacher_forcing_ratio = max(0.5 - epoch * 0.02, 0.1)  # or similar schedule
-            use_teacher = random.random() < teacher_forcing_ratio
-
-            print(f'Use Teacher Forcing: {use_teacher}')
-            train_state = self.train_loop(use_teacher_forcing=use_teacher)
-            test_state = self.test_loop()
-            current_statistic = {}
-            current_statistic.update(train_state)
-            current_statistic.update(test_state)
-
-            if save_check_point:
-                # Create Checkpoint Directory
-                date = datetime.datetime.today().strftime("%Y%m%d")
-                time = datetime.datetime.now().strftime("%H%M%S")
-                checkpoint_dir = pathlib.Path(f'Checkpoints') / self.name / date
-                checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Create Checkpoint Path
-                checkpoint_name = f'{self.name}_epoch{epoch_idx}_{date}_{time}.pt'
-                checkpoint_path = str(checkpoint_dir/checkpoint_name)
-                checkpoint_dict = self.get_checkpoint_dict(self.model, self.optimizer, epoch_idx, current_statistic)
-                torch.save(checkpoint_dict, checkpoint_path)
-
-            if graph:
-                if epoch == 0:
-                    fig, ax, lines, x_data, y_data = graph_loss_animation_start(
-                        stat_names = list(current_statistic.keys()),
-                        title=f'{self.name}'
-                    )
-
-                graph_loss_animation_update(epoch, current_statistic, ax, lines, x_data, y_data)
-            
-        if graph:
-            graph_loss_animation_end()
-
-    def train_loop(self, use_teacher_forcing: bool):
         self.model.train()
 
         train_loss = 0.0
         for batch, (source_tokens, decoder_input, decoder_output) in enumerate(self.train_loader):
-            source_tokens = source_tokens.to(self.device)
-            decoder_input = decoder_input.to(self.device)
-            decoder_output = decoder_output.to(self.device)
+            source_tokens: torch.Tensor = source_tokens.to(self.device)
+            decoder_input: torch.Tensor = decoder_input.to(self.device)
+            decoder_output: torch.Tensor = decoder_output.to(self.device)
+            
+            tgt_key_padding_mask = decoder_input == self.doc_tokenizer.pad_token
+            src_key_padding_mask = source_tokens == self.doc_tokenizer.pad_token
 
             # Include decoder input for teacher forcing.
-            if use_teacher_forcing:
-                predict = self.model(source_tokens, decoder_input)
+            if use_teacher:
+                predict = self.model(
+                    src_tensor=source_tokens,
+                    decoder_input=decoder_input,
+                    src_key_padding_mask=src_key_padding_mask,
+                    tgt_key_padding_mask=tgt_key_padding_mask
+                )
             else:
-                predict = self.model(source_tokens)
+                bos_token = self.doc_tokenizer.bos_token
+                eos_token = self.doc_tokenizer.eos_token
+                pad_token = self.doc_tokenizer.pad_token
+
+                predict = self.model.forward_autoregressively(
+                    src_tensor=source_tokens,
+                    bos_token=bos_token,
+                    eos_token=eos_token,
+                    pad_token=pad_token,
+                    sequence_length=decoder_input.size(1),
+                    src_key_padding_mask=src_key_padding_mask
+                )
 
             loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
@@ -115,8 +94,19 @@ class CodeDocTrainer(BaseTrainer):
             source_tokens = source_tokens.to(self.device)
             decoder_output = decoder_output.to(self.device)
 
+            bos_token = self.doc_tokenizer.bos_token
+            eos_token = self.doc_tokenizer.eos_token
+            pad_token = self.doc_tokenizer.pad_token
+
             with torch.no_grad():
-                predict = self.model(source_tokens)
+                predict = self.model.forward_autoregressively(
+                    src_tensor=source_tokens,
+                    bos_token=bos_token,
+                    eos_token=eos_token,
+                    pad_token=pad_token,
+                    sequence_length=decoder_output.size(1),
+                    src_key_padding_mask=source_tokens==pad_token
+                )
                 loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
                 test_loss += loss.item()
             
@@ -156,12 +146,19 @@ def get_class_weight_vector(tokenizer: Tokenizer) -> torch.Tensor:
 
 def main():
 
-    # Configure hyperparameters
-    input_size = 8192
+    # Dataset hyperparameters
+    input_size = 100000
     output_size = 8192
-    batch_size = 64
-    hidden_size = 256
+    batch_size = 32
     sequence_length = 128
+
+    # Model hyperparameters
+    nblock = 1
+    nhead = 4
+    hidden_size = 256
+    ffn_hidden_size = 256
+
+    # Traning hyperparameters
     dropout_p = 0.3
     weight_decay = 1e-5
     learning_rate = 5e-4
@@ -201,14 +198,31 @@ def main():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     encoder_input_size = len(code_tokenizer)
     decoder_output_size = len(doc_tokenizer)
-    encoder = model.encoder.RNNEncoder(encoder_input_size, hidden_size, dropout_p=dropout_p).to(device)
-    decoder = model.decoder.BahdanauAttentionDecoder(hidden_size,
-                                                     decoder_output_size,
-                                                     code_tokenizer.bos_token,
-                                                     code_tokenizer.eos_token,
-                                                     code_tokenizer.pad_token,
-                                                     drop_p=dropout_p).to(device)
-    seq2seq = model.seq2seq.Seq2SeqModel(encoder, decoder).to(device)
+
+    encoder = model.transformer.TransformerEncoder(
+        nblock=nblock,
+        nhead=nhead,
+        input_size=encoder_input_size,
+        seq_size=sequence_length,
+        hidden_size=hidden_size,
+        ffn_hidden_size=ffn_hidden_size,
+        dropout_p=dropout_p
+    ).to(device)
+
+    decoder = model.transformer.TransformerDecoder(
+        nblock=nblock,
+        nhead=nhead,
+        output_size=decoder_output_size,
+        seq_size=sequence_length,
+        hidden_size=hidden_size,
+        ffn_hidden_size=ffn_hidden_size,
+        dropout_p=dropout_p
+    ).to(device)
+
+    seq2seq = model.transformer.Transformer(
+        encoder=encoder,
+        decoder=decoder
+    ).to(device)
 
     # # Get class weight
     class_weight = get_class_weight_vector(doc_tokenizer).to(device)
@@ -222,7 +236,7 @@ def main():
 
     # Prepare Trainer
     trainer = CodeDocTrainer(
-        name='Attention_Code2Doc_Model',
+        name='Transformer_Code2Doc_Model',
         model=seq2seq,
         optimizer=optimizer,
         loss_fn=loss_fn,
@@ -234,7 +248,7 @@ def main():
 
     trainer.fit(
         epochs=50,
-        save_check_point = True,
+        save_check_point=True,
         graph=True
     )
 
