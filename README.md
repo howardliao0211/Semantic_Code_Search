@@ -29,7 +29,7 @@ A hands-on implementation of **semantic code search** using deep learning. Inspi
 
 ---
 
-### 2025_0628_2 — Implemented the Transformer Architecture
+### 2025_0709 — Implemented the Transformer Architecture
 
 - Implemented the Transformer encoder and decoder.
 - Training time is too long. 
