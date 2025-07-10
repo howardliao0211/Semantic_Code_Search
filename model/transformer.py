@@ -1,5 +1,5 @@
 from torch import nn
-from torch import nn
+import torch.nn.functional as F
 from typing import Optional
 import torch
 import math
@@ -19,34 +19,24 @@ class PositionEncoding(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         seq_size = input.size(1)
-        input += self.position_emb_matrix[:, :seq_size, :].to(input.device)
+        input = input + self.position_emb_matrix[:, :seq_size, :].requires_grad_(False).to(input.device)
         return self.dropout(input)
 
-class AddNorm(nn.Module):
+class Embeddings(nn.Module):
 
-    def __init__(self, norm_shape: int, dropout_p: float):
+    def __init__(self, input_size, emb_size):
         super().__init__()
-        self.norm = nn.LayerNorm(norm_shape)
-        self.dropout = nn.Dropout(dropout_p)
+        self.emb = nn.Embedding(input_size, emb_size)
+        self.emb_size = emb_size
     
-    def forward(self, input: torch.Tensor, weight: torch.Tensor):
-        return self.norm(input + self.dropout(weight))
-
-class PositionWiseFFN(nn.Module):
-
-    def __init__(self, input_size: int, hidden_size: int, output_size: int, dropout_p: float):
-        self.linear1 = nn.Linear(input_size, hidden_size)
-        self.linear2 = nn.Linear(hidden_size, output_size)
-        self.nonlinear = nn.ReLU()
-    
-    def forward(self, X):
-        return self.linear2(self.nonlinear(self.linear1(X)))
+    def forward(self, x):
+        return self.emb(x) * math.sqrt(self.emb_size)
 
 class TransformerEncoder(nn.Module):
 
     def __init__(self, nblock: int, nhead: int, input_size, seq_size, hidden_size, ffn_hidden_size, dropout_p: float):
         super().__init__()
-        self.emb = nn.Embedding(input_size, hidden_size)
+        self.emb = Embeddings(input_size, hidden_size)
         self.position_encoding = PositionEncoding(seq_size, hidden_size, dropout_p)
         self.encoder_layer = nn.TransformerEncoderLayer(
             d_model=hidden_size,
@@ -59,7 +49,7 @@ class TransformerEncoder(nn.Module):
         self.hidden_size = hidden_size
     
     def forward(self, input, src_key_padding_mask=None):
-        emb = self.position_encoding(self.emb(input) / math.sqrt(self.hidden_size))
+        emb = self.position_encoding(self.emb(input))
         return self.encoder(emb, src_key_padding_mask=src_key_padding_mask)
 
 class TransformerDecoder(nn.Module):
@@ -67,7 +57,7 @@ class TransformerDecoder(nn.Module):
     def __init__(self, nblock, nhead, output_size, seq_size, hidden_size, ffn_hidden_size, dropout_p):
         super().__init__()
 
-        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.embedding = Embeddings(output_size, hidden_size)
         self.position_encoding = PositionEncoding(seq_size, hidden_size, dropout_p)
         self.decoder_layer = nn.TransformerDecoderLayer(
             d_model=hidden_size,
@@ -89,13 +79,11 @@ class TransformerDecoder(nn.Module):
             memory=memory,
             tgt_mask=tgt_mask,
             tgt_key_padding_mask=tgt_key_padding_mask,
-            memory_key_padding_mask=memory_key_padding_mask
+            memory_key_padding_mask=memory_key_padding_mask,
+            tgt_is_causal=True
         )
 
         return self.final_fc(decoder_output)
-
-def subsequent_mask(size, device):
-    return torch.triu(torch.ones(size, size, device=device), diagonal=1).bool()
 
 
 class Transformer(nn.Module):
@@ -104,7 +92,11 @@ class Transformer(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-    
+        
+        for p in self.parameters():
+            if p.dim() > 1:
+                torch.nn.init.xavier_uniform_(p)
+
     def forward(self,
                 src_tensor: torch.Tensor,
                 decoder_input: torch.Tensor,
@@ -122,7 +114,7 @@ class Transformer(nn.Module):
         decoder_output = self.decoder(
             tgt_tensor=decoder_input,
             memory=encoder_output,
-            tgt_mask=subsequent_mask(seq_size, device),
+            tgt_mask=self._subsequent_mask(seq_size, device),
             tgt_key_padding_mask=tgt_key_padding_mask,
             memory_key_padding_mask=src_key_padding_mask
         )
@@ -134,7 +126,7 @@ class Transformer(nn.Module):
                                  bos_token: int,
                                  eos_token: int,
                                  pad_token: int,
-                                 sequence_length: int,
+                                 max_len: int,
                                  src_key_padding_mask=None):
         
         batch_size = src_tensor.size(0)
@@ -148,14 +140,20 @@ class Transformer(nn.Module):
         finished = torch.zeros(batch_size, dtype=torch.bool, device=src_tensor.device)
         logits = []
 
-        for _ in range(sequence_length):
+        encoder_output = self.encoder(
+            input=src_tensor,
+            src_key_padding_mask=src_key_padding_mask
+        )
+
+        for _ in range(max_len):
             tgt_key_padding_mask = decoder_input == pad_token
 
-            logit:torch.Tensor = self(
-                src_tensor=src_tensor,
-                decoder_input=decoder_input,
-                src_key_padding_mask=src_key_padding_mask,
-                tgt_key_padding_mask=tgt_key_padding_mask
+            logit:torch.Tensor = self.decoder(
+                tgt_tensor=decoder_input,
+                memory=encoder_output,
+                tgt_mask=self._subsequent_mask(decoder_input.size(1), src_tensor.device),
+                tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=src_key_padding_mask,
             )
 
             next_token = logit[:, -1, :].argmax(dim=-1, keepdim=True)
@@ -175,8 +173,8 @@ class Transformer(nn.Module):
         logits = torch.stack(logits, dim=1)
         emb_size = logits.size(-1)
 
-        if logits.size(1) < sequence_length:
-            seq_to_pad = sequence_length - logits.size(1)
+        if logits.size(1) < max_len:
+            seq_to_pad = max_len - logits.size(1)
             # Need to create a tensor with shape (batch_size, to_pad, emb_size)
             to_pad = torch.full(
                 size=(batch_size, seq_to_pad, emb_size),
@@ -187,4 +185,7 @@ class Transformer(nn.Module):
             logits = torch.cat((logits, to_pad), dim=1)
 
         return logits
+    
+    def _subsequent_mask(self, size, device):
+        return nn.Transformer.generate_square_subsequent_mask(size, device, dtype=bool)
 

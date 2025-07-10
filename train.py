@@ -27,13 +27,9 @@ class CodeDocTrainer(BaseTrainer):
     train_epoch: int = 0
 
     def fit(self, epochs, trained_epochs = 0, graph = False, save_check_point = False):
-        self.train_epoch = 0
         return super().fit(epochs, trained_epochs, graph, save_check_point)
 
     def train_loop(self):
-        teacher_forcing_ratio = max(0.5 - self.train_epoch * 0.02, 0.1)
-        use_teacher = random.random() < teacher_forcing_ratio
-        print(f'Use Teacher Forcing: {use_teacher}')
         self.train_epoch += 1
 
         self.model.train()
@@ -48,32 +44,18 @@ class CodeDocTrainer(BaseTrainer):
             src_key_padding_mask = source_tokens == self.doc_tokenizer.pad_token
 
             # Include decoder input for teacher forcing.
-            if use_teacher:
-                predict = self.model(
-                    src_tensor=source_tokens,
-                    decoder_input=decoder_input,
-                    src_key_padding_mask=src_key_padding_mask,
-                    tgt_key_padding_mask=tgt_key_padding_mask
-                )
-            else:
-                bos_token = self.doc_tokenizer.bos_token
-                eos_token = self.doc_tokenizer.eos_token
-                pad_token = self.doc_tokenizer.pad_token
-
-                predict = self.model.forward_autoregressively(
-                    src_tensor=source_tokens,
-                    bos_token=bos_token,
-                    eos_token=eos_token,
-                    pad_token=pad_token,
-                    sequence_length=decoder_input.size(1),
-                    src_key_padding_mask=src_key_padding_mask
-                )
-
+            # Can always train with teaching forcing because tgt_mask is provided.
+            predict = self.model(
+                src_tensor=source_tokens,
+                decoder_input=decoder_input,
+                src_key_padding_mask=src_key_padding_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask
+            )
+            
             loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
             train_loss += loss.item()
@@ -104,10 +86,10 @@ class CodeDocTrainer(BaseTrainer):
                     bos_token=bos_token,
                     eos_token=eos_token,
                     pad_token=pad_token,
-                    sequence_length=decoder_output.size(1),
+                    max_len=decoder_output.size(1),
                     src_key_padding_mask=source_tokens==pad_token
                 )
-                loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
+                loss = self.loss_fn(predict.contiguous().view(-1, predict.size(-1)), decoder_output.contiguous().view(-1))
                 test_loss += loss.item()
             
                 # Convert predicted token IDs to words
@@ -123,7 +105,10 @@ class CodeDocTrainer(BaseTrainer):
         test_loss /= len(self.test_loader)
 
         # Compute Bleu score based on the first sequence in the last batch
-        results = bleu.compute(predictions=predictions, references=references)
+        try:
+            results = bleu.compute(predictions=predictions, references=references)
+        except ZeroDivisionError:
+            results = {'bleu': 0.0}
 
         # Print Message
         print(f'Test Loss: {test_loss:5f}, Bleu: {results['bleu']:.5f}')
@@ -150,13 +135,13 @@ def main():
     input_size = 100000
     output_size = 8192
     batch_size = 32
-    sequence_length = 128
+    sequence_length = 32
 
     # Model hyperparameters
-    nblock = 1
-    nhead = 4
-    hidden_size = 256
-    ffn_hidden_size = 256
+    nblock = 6
+    nhead = 8
+    hidden_size = 512
+    ffn_hidden_size = 2048
 
     # Traning hyperparameters
     dropout_p = 0.3
@@ -165,13 +150,14 @@ def main():
     label_smoothing = 0.1
 
     # Get datasets
-    DATASET_LOCAL_PATH = Path(r'./preprocessed_dataset')
+    DATASET_LOCAL_PATH = Path(r'./preprocessed_dataset_32')
     code_tokenizer = Tokenizer(input_size)
     doc_tokenizer = Tokenizer(output_size)
     train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path=DATASET_LOCAL_PATH,
                                                       code_tokenizer=code_tokenizer,
                                                       doc_tokenizer=doc_tokenizer,
                                                       sequence_length=sequence_length)
+    # train_dataset.show_triplets(1, code_tokenizer, doc_tokenizer, False)
 
     # Create data loaders
     train_loader = DataLoader(
@@ -191,8 +177,6 @@ def main():
         batch_size=batch_size,
         shuffle=False
     )
-
-    train_dataset.show_triplets(3, code_tokenizer, doc_tokenizer)
 
     # Prepare model
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -236,7 +220,7 @@ def main():
 
     # Prepare Trainer
     trainer = CodeDocTrainer(
-        name='Transformer_Code2Doc_Model',
+        name='Transformer_Code2Doc_Model_32seq',
         model=seq2seq,
         optimizer=optimizer,
         loss_fn=loss_fn,
@@ -248,7 +232,7 @@ def main():
 
     trainer.fit(
         epochs=50,
-        save_check_point=True,
+        save_check_point=False,
         graph=True
     )
 

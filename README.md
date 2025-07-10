@@ -19,6 +19,16 @@ A hands-on implementation of **semantic code search** using deep learning. Inspi
 [ ] **Create frontend and backend for model deployment (Optional)**
 
 ## Development Log
+
+### 2025_0710 — Used smaller sequence length to debug model performance
+
+![Result](results/Transformer_Code2Doc_Model_32seq_2025_0710.png)
+
+- Model is not learning.
+- Model tends to predict most frequent token to reduce loss.
+
+---
+
 ### 2025_0709 — Implemented the Transformer Architecture
 
 ![Result](resources/Transformer.png)
@@ -26,7 +36,7 @@ A hands-on implementation of **semantic code search** using deep learning. Inspi
 - Implemented the Transformer encoder and decoder.
 - Training time is too long. 
 - **Potential Solutions**:
-  1. Study torch optimization for transformers.
+  1. Study torch optimization for transformers - Torch nested tensor can only be used for inference...
   2. Use huggingface API for transformers.
 
 ---

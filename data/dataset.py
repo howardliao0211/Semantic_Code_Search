@@ -42,14 +42,14 @@ class CodeDocDataset(Dataset):
 
         return encoder_input, decoder_input, decoder_output
     
-    def show_triplets(self, num: int, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> None:
+    def show_triplets(self, num: int, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, skip_special_tokens: bool) -> None:
         for i in range(num):
             index = random.randint(0, len(self) - 1)
             encoder_input, decoder_input, decoder_output = self[index]
             print(f'#{i}')
-            print(f'    encoder_input:  {code_tokenizer.to_word(encoder_input.tolist())}')
-            print(f'    decoder_input:  {doc_tokenizer.to_word(decoder_input.tolist())}')
-            print(f'    decoder_output: {doc_tokenizer.to_word(decoder_output.tolist())}')
+            print(f'    encoder_input:  {code_tokenizer.to_word(encoder_input.tolist(), skip_special_tokens)}')
+            print(f'    decoder_input:  {doc_tokenizer.to_word(decoder_input.tolist(), skip_special_tokens)}')
+            print(f'    decoder_output: {doc_tokenizer.to_word(decoder_output.tolist(), skip_special_tokens)}')
 
     def _pad_or_trunc(self, tokens: list[str], sequence_length: int) -> list[str]:
         if len(tokens) > sequence_length:
