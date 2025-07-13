@@ -17,6 +17,7 @@ bleu = evaluate.load('bleu')
 @dataclass
 class CodeDocTrainer(BaseTrainer):
 
+    input_lang: Lang
     output_lang: Lang
     trained_epochs:int=0
 
@@ -28,11 +29,11 @@ class CodeDocTrainer(BaseTrainer):
         self.model.train()
 
         train_loss = 0.0
-        # source_tokens, decoder_output = next(iter(self.train_loader))
-        src = random.choice(list(self.output_lang.word2index.keys()))
-        tgt = random.choice(list(self.output_lang.word2index.keys()))
-        source_tokens = torch.tensor([self.output_lang.word2index[s] for s in src.split()]).unsqueeze(0).to(self.device)
-        decoder_output = torch.tensor([self.output_lang.word2index[t] for t in tgt.split()] + [EOS_token]).unsqueeze(0).to(self.device)
+        source_tokens, decoder_output = next(iter(self.train_loader))
+        # src = random.choice(list(self.output_lang.word2index.keys()))
+        # tgt = random.choice(list(self.output_lang.word2index.keys()))
+        # source_tokens = torch.tensor([self.output_lang.word2index[s] for s in src.split()]).unsqueeze(0).to(self.device)
+        # decoder_output = torch.tensor([self.output_lang.word2index[t] for t in tgt.split()] + [EOS_token]).unsqueeze(0).to(self.device)
 
         with open('debug.txt', 'w') as f:
             pass
@@ -42,7 +43,6 @@ class CodeDocTrainer(BaseTrainer):
 
         for test_idx in range(to_test):
 
-            max_len = (decoder_output != PAD_token).sum(dim=1).max().item()
             source_tokens = source_tokens.to(self.device)
             decoder_input = torch.cat(
                 (torch.full((decoder_output.size(0), 1), SOS_token).to(source_tokens.device), decoder_output[:, :-1]),
@@ -50,18 +50,12 @@ class CodeDocTrainer(BaseTrainer):
             )
             decoder_output = decoder_output.to(self.device)
 
-            decoder_input = decoder_input[:, :max_len]
-            decoder_output = decoder_output[:, :max_len]
-            source_tokens = source_tokens[:, :max_len]  # optional but good to keep aligned
-
             predict = self.model(
                 src_tensor=source_tokens,
                 decoder_input=decoder_input,
                 src_key_padding_mask=source_tokens == pad_token,
                 tgt_key_padding_mask=decoder_input == pad_token
             )
-
-            predict = predict[:, :max_len, :]
 
             loss = self.loss_fn(predict.view(-1, vocab_size), decoder_output.view(-1))
 
@@ -78,7 +72,7 @@ class CodeDocTrainer(BaseTrainer):
                 f.write(f"     Prediction:      {predict.argmax(-1)[0]}\n", )     # Entire first sample
                 f.write(f"     Target:          {decoder_output[0]}\n")
                 f.write('\n')
-                f.write(f"     Source:          {self.output_lang.to_word(source_tokens[0].tolist())}\n")
+                f.write(f"     Source:          {self.input_lang.to_word(source_tokens[0].tolist())}\n")
                 f.write(f"     Input :          {self.output_lang.to_word(decoder_input[0].tolist())}\n")
                 f.write(f'     Prediction:      {self.output_lang.to_word(predict.argmax(-1)[0].tolist())}\n')
                 f.write(f"     Target:          {self.output_lang.to_word(decoder_output[0].tolist())}\n")
@@ -182,7 +176,7 @@ def main():
     # Dataset hyperparameters
     input_size = 100000
     output_size = 8192
-    batch_size = 1
+    batch_size = 32
     sequence_length = MAX_LENGTH
 
     # Model hyperparameters
@@ -192,7 +186,7 @@ def main():
     ffn_hidden_size = 256
 
     # Traning hyperparameters
-    dropout_p = 0
+    dropout_p = 0.1
     learning_rate = 5e-4
     weight_decay = 1e-5
     label_smoothing = 0.1
@@ -270,15 +264,16 @@ def main():
         train_loader=train_loader,
         test_loader=None,
         device=device,
-        output_lang=target_lang
+        input_lang=input_lang,
+        output_lang=target_lang,
     )
 
-    # trainer.fit(
-    #     epochs=50,
-    #     save_check_point = True,
-    #     graph=False
-    # )
-    trainer.train_debug(1000)
+    trainer.fit(
+        epochs=50,
+        save_check_point = False,
+        graph=True
+    )
+    # trainer.train_debug(1000)
 
 if __name__ == '__main__':
     main()
