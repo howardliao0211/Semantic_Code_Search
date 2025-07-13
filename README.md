@@ -20,6 +20,31 @@ A hands-on implementation of **semantic code search** using deep learning. Inspi
 
 ## Development Log
 
+### 2025_0713 — Scaled down model's hyperparameter
+
+![Result](results/Transformer_Code2Doc_Model_32seq_2025_0713.png)
+
+- Original hyperparameter:
+```
+# Model hyperparameters
+nblock = 6
+nhead = 8
+hidden_size = 512
+ffn_hidden_size = 2048
+```
+- Scaled down hyperparameters:
+```
+# Model hyperparameters
+nblock = 2
+nhead = 2
+hidden_size = 128
+ffn_hidden_size = 512
+```
+- The current dataset is relatively simple and does not benefit from a deep Transformer architecture.
+- The original model was overparameterized, causing unstable gradients and poor convergence.
+- After scaling down, training became more stable and loss decreased effectively, confirming the model is better suited to the task complexity.
+---
+
 ### 2025_0710 — Used smaller sequence length to debug model performance
 
 ![Result](results/Transformer_Code2Doc_Model_32seq_2025_0710.png)

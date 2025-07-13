@@ -139,13 +139,13 @@ def main():
     sequence_length = 32
 
     # Model hyperparameters
-    nblock = 6
-    nhead = 8
-    hidden_size = 512
-    ffn_hidden_size = 2048
+    nblock = 2
+    nhead = 2
+    hidden_size = 128
+    ffn_hidden_size = 512
 
     # Traning hyperparameters
-    dropout_p = 0.3
+    dropout_p = 0.1
     weight_decay = 1e-5
     learning_rate = 5e-4
     label_smoothing = 0.1
@@ -234,7 +234,7 @@ def main():
     )
 
     trainer.fit(
-        epochs=200,
+        epochs=30,
         save_check_point=False,
         graph=True
     )
