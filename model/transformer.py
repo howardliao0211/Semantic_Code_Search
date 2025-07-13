@@ -70,7 +70,6 @@ class TransformerDecoder(nn.Module):
             decoder_layer=self.decoder_layer,
             num_layers=nblock
         )
-        self.final_fc = nn.Linear(hidden_size, output_size)
     
     def forward(self, tgt_tensor, memory, tgt_mask, tgt_key_padding_mask=None, memory_key_padding_mask=None):
         tgt_tensor = self.position_encoding(self.embedding(tgt_tensor))
@@ -82,17 +81,17 @@ class TransformerDecoder(nn.Module):
             memory_key_padding_mask=memory_key_padding_mask,
             tgt_is_causal=True
         )
-
-        return self.final_fc(decoder_output)
+        return decoder_output
 
 
 class Transformer(nn.Module):
 
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder, decoder, hidden_size, output_size):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        
+        self.final_fc = nn.Linear(hidden_size, output_size)
+
         for p in self.parameters():
             if p.dim() > 1:
                 torch.nn.init.xavier_uniform_(p)
@@ -118,8 +117,11 @@ class Transformer(nn.Module):
             tgt_key_padding_mask=tgt_key_padding_mask,
             memory_key_padding_mask=src_key_padding_mask
         )
+
+        out = torch.tanh(decoder_output).contiguous()
+        final_out = self.final_fc(out)
         
-        return decoder_output
+        return final_out
     
     def forward_autoregressively(self,
                                  src_tensor: torch.Tensor,
@@ -184,7 +186,10 @@ class Transformer(nn.Module):
             )
             logits = torch.cat((logits, to_pad), dim=1)
 
-        return logits
+        out = torch.tanh(logits).contiguous()
+        final_out = self.final_fc(out)
+        
+        return final_out
     
     def _subsequent_mask(self, size, device):
         return nn.Transformer.generate_square_subsequent_mask(size, device, dtype=bool)

@@ -16,6 +16,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 SOS_token = 0
 EOS_token = 1
+PAD_token = 2
 
 class Lang:
     def __init__(self, name):
@@ -37,6 +38,21 @@ class Lang:
             self.n_words += 1
         else:
             self.word2count[word] += 1
+    
+    def to_word_batch(self, batched_indices) -> list[str]:
+        word_batch = []
+
+        for indices in batched_indices:
+            words = []
+            for idx in indices:
+                if idx in (EOS_token, PAD_token):  # stop at EOS or PAD
+                    break
+                if idx == SOS_token:
+                    continue  # skip BOS and UNK in output
+                words.append(self.index2word[idx])
+            word_batch.append(' '.join(words))
+
+        return word_batch
 
 # Turn a Unicode string to plain ASCII, thanks to
 # https://stackoverflow.com/a/518232/2809427
@@ -130,6 +146,8 @@ def get_dataloader(batch_size):
     n = len(pairs)
     input_ids = np.zeros((n, MAX_LENGTH), dtype=np.int32)
     target_ids = np.zeros((n, MAX_LENGTH), dtype=np.int32)
+    # input_ids.fill(PAD_token)
+    # target_ids.fill(PAD_token)
 
     for idx, (inp, tgt) in enumerate(pairs):
         inp_ids = indexesFromSentence(input_lang, inp)

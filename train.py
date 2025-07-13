@@ -45,13 +45,13 @@ class CodeDocTrainer(BaseTrainer):
 
             # Include decoder input for teacher forcing.
             # Can always train with teaching forcing because tgt_mask is provided.
-            predict = self.model(
+            predict:torch.Tensor = self.model(
                 src_tensor=source_tokens,
                 decoder_input=decoder_input,
                 src_key_padding_mask=src_key_padding_mask,
                 tgt_key_padding_mask=tgt_key_padding_mask
             )
-            
+
             loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
             self.optimizer.zero_grad()
@@ -81,13 +81,14 @@ class CodeDocTrainer(BaseTrainer):
             pad_token = self.doc_tokenizer.pad_token
 
             with torch.no_grad():
+                src_key_padding_mask = source_tokens == pad_token
                 predict = self.model.forward_autoregressively(
                     src_tensor=source_tokens,
                     bos_token=bos_token,
                     eos_token=eos_token,
                     pad_token=pad_token,
                     max_len=decoder_output.size(1),
-                    src_key_padding_mask=source_tokens==pad_token
+                    src_key_padding_mask=src_key_padding_mask
                 )
                 loss = self.loss_fn(predict.contiguous().view(-1, predict.size(-1)), decoder_output.contiguous().view(-1))
                 test_loss += loss.item()
@@ -157,7 +158,7 @@ def main():
                                                       code_tokenizer=code_tokenizer,
                                                       doc_tokenizer=doc_tokenizer,
                                                       sequence_length=sequence_length)
-    # train_dataset.show_triplets(1, code_tokenizer, doc_tokenizer, False)
+    train_dataset.show_triplets(1, code_tokenizer, doc_tokenizer, skip_special_tokens=False)
 
     # Create data loaders
     train_loader = DataLoader(
@@ -205,7 +206,9 @@ def main():
 
     seq2seq = model.transformer.Transformer(
         encoder=encoder,
-        decoder=decoder
+        decoder=decoder,
+        hidden_size=hidden_size,
+        output_size=decoder_output_size
     ).to(device)
 
     # # Get class weight
@@ -231,7 +234,7 @@ def main():
     )
 
     trainer.fit(
-        epochs=50,
+        epochs=200,
         save_check_point=False,
         graph=True
     )
