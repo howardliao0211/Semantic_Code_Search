@@ -46,11 +46,9 @@ class Lang:
         for indices in batched_indices:
             words = []
             for idx in indices:
-                if idx in (EOS_token, PAD_token):  # stop at EOS or PAD
-                    break
-                if idx == SOS_token:
-                    continue  # skip BOS and UNK in output
                 words.append(self.index2word[idx])
+                if idx == EOS_token:
+                    break
             word_batch.append(' '.join(words))
 
         return word_batch
@@ -147,7 +145,7 @@ def tensorsFromPair(pair):
     target_tensor = tensorFromSentence(output_lang, pair[1])
     return (input_tensor, target_tensor)
 
-def get_dataloader(batch_size):
+def get_dataloader(batch_size, test_prob):
     input_lang, output_lang, pairs = prepareData('eng', 'fra', True)
 
     n = len(pairs)
@@ -164,9 +162,26 @@ def get_dataloader(batch_size):
         input_ids[idx, :len(inp_ids)] = inp_ids
         target_ids[idx, :len(tgt_ids)] = tgt_ids
 
-    train_data = TensorDataset(torch.LongTensor(input_ids).to(device),
-                               torch.LongTensor(target_ids).to(device))
+    test_len = int(n * test_prob)
+
+    train_data = TensorDataset(
+        torch.LongTensor(input_ids[test_len:, :]).to(device),
+        torch.LongTensor(target_ids[test_len:, :]).to(device)
+    )
+
+    test_data = TensorDataset(
+        torch.LongTensor(input_ids[:test_len, :]).to(device),
+        torch.LongTensor(target_ids[:test_len, :]).to(device)
+    )
 
     train_sampler = RandomSampler(train_data)
+    test_sampler = RandomSampler(test_data)
+
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
-    return input_lang, output_lang, train_dataloader
+    test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=batch_size)
+
+    return input_lang, output_lang, train_dataloader, test_dataloader
+
+if __name__ == '__main__':
+    _, _, train, test = get_dataloader(64, 0.2)
+    print(f'train: {len(train.dataset)}. test: {len(test.dataset)}')

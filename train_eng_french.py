@@ -3,6 +3,7 @@ from data.tokenizer import Tokenizer
 from pathlib import Path
 from torch.utils.data import DataLoader
 from trainers.core import BaseTrainer
+from trainers.utils import StaticPlotter
 from dataclasses import dataclass
 from data.french_dataset import get_dataloader, SOS_token, EOS_token, Lang, MAX_LENGTH, PAD_token
 import evaluate
@@ -118,16 +119,13 @@ class CodeDocTrainer(BaseTrainer):
     
     def test_loop(self):
 
-        if self.trained_epochs < 30:
-            return {}
-
         self.model.eval()
         
         test_loss = 0.0
         references = []
         predictions = []
 
-        for source_tokens, decoder_output in self.train_loader:
+        for source_tokens, decoder_output in self.test_loader:
             source_tokens = source_tokens.to(self.device)
             decoder_output = decoder_output.to(self.device)
 
@@ -157,10 +155,7 @@ class CodeDocTrainer(BaseTrainer):
         test_loss /= len(self.train_loader)
 
         # Compute Bleu score based on the first sequence in the last batch
-        try:
-            results = bleu.compute(predictions=predictions, references=references)
-        except ZeroDivisionError:
-            results = {'bleu': 0.0}
+        results = bleu.compute(predictions=predictions, references=references)
 
         # Print Message
         print(f'Test Loss: {test_loss:5f}, Bleu: {results['bleu']:.5f}')
@@ -186,7 +181,7 @@ def main():
     ffn_hidden_size = 256
 
     # Traning hyperparameters
-    dropout_p = 0.1
+    dropout_p = 0.3
     learning_rate = 5e-4
     weight_decay = 1e-5
     label_smoothing = 0.1
@@ -219,7 +214,7 @@ def main():
     #     shuffle=False
     # )
 
-    input_lang, target_lang, train_loader = get_dataloader(batch_size)
+    input_lang, target_lang, train_loader, test_loader = get_dataloader(batch_size, 0.2)
 
     # Prepare model
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -262,8 +257,9 @@ def main():
         optimizer=torch.optim.Adam(seq2seq.parameters(), lr=learning_rate),
         loss_fn=torch.nn.CrossEntropyLoss(ignore_index=PAD_token),
         train_loader=train_loader,
-        test_loader=None,
+        test_loader=test_loader,
         device=device,
+        plotter=StaticPlotter(),
         input_lang=input_lang,
         output_lang=target_lang,
     )

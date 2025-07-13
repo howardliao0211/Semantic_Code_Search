@@ -121,11 +121,11 @@ class Tokenizer:
         for indices in batched_indices:
             words = []
             for idx in indices:
-                if idx in (EOS_IDX, PAD_IDX):  # stop at EOS or PAD
+                if idx == PAD_IDX:  # stop at EOS or PAD
+                    continue
+                words.append(self.to_word(idx, skip_special_tokens=False))
+                if idx == EOS_IDX:
                     break
-                if idx in (BOS_IDX, UNK_IDX):
-                    continue  # skip BOS and UNK in output
-                words.append(self.to_word(idx))
             word_batch.append(' '.join(words))
 
         return word_batch

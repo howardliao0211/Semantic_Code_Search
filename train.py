@@ -3,7 +3,7 @@ from data.tokenizer import Tokenizer
 from pathlib import Path
 from torch.utils.data import DataLoader
 from trainers.core import BaseTrainer
-from trainers.utils import graph_loss_animation_start, graph_loss_animation_update, graph_loss_animation_end, load_checkpoint
+from trainers.utils import AnimatePlotter
 from dataclasses import dataclass
 import math
 import datetime
@@ -23,15 +23,10 @@ bleu = evaluate.load('bleu')
 class CodeDocTrainer(BaseTrainer):
 
     model: model.transformer.Transformer
+    scheduler: torch.optim.lr_scheduler.LambdaLR
     doc_tokenizer: Tokenizer
-    train_epoch: int = 0
-
-    def fit(self, epochs, trained_epochs = 0, graph = False, save_check_point = False):
-        return super().fit(epochs, trained_epochs, graph, save_check_point)
 
     def train_loop(self):
-        self.train_epoch += 1
-
         self.model.train()
 
         train_loss = 0.0
@@ -57,6 +52,7 @@ class CodeDocTrainer(BaseTrainer):
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            self.scheduler.step()
 
             train_loss += loss.item()
             if (batch + 1) % 64 == 0:
@@ -106,10 +102,7 @@ class CodeDocTrainer(BaseTrainer):
         test_loss /= len(self.test_loader)
 
         # Compute Bleu score based on the first sequence in the last batch
-        try:
-            results = bleu.compute(predictions=predictions, references=references)
-        except ZeroDivisionError:
-            results = {'bleu': 0.0}
+        results = bleu.compute(predictions=predictions, references=references)
 
         # Print Message
         print(f'Test Loss: {test_loss:5f}, Bleu: {results['bleu']:.5f}')
@@ -151,7 +144,7 @@ def main():
     label_smoothing = 0.1
 
     # Get datasets
-    DATASET_LOCAL_PATH = Path(r'./preprocessed_dataset_32')
+    DATASET_LOCAL_PATH = Path(fr'./preprocessed_dataset_{sequence_length}')
     code_tokenizer = Tokenizer(input_size)
     doc_tokenizer = Tokenizer(output_size)
     train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path=DATASET_LOCAL_PATH,
@@ -215,7 +208,12 @@ def main():
     class_weight = get_class_weight_vector(doc_tokenizer).to(device)
 
     # Optimizer and Loss Function
-    optimizer = torch.optim.Adam(seq2seq.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    def noam_lambda(step):
+        step = max(step, 1)
+        return (512 ** -0.5) * min(step ** -0.5, step * 4000 ** -1.5)
+
+    optimizer = torch.optim.Adam(seq2seq.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=noam_lambda)
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=code_tokenizer.pad_token, label_smoothing=label_smoothing, weight=class_weight)
 
     print(f'encoder_input_size: {encoder_input_size}')
@@ -226,16 +224,18 @@ def main():
         name='Transformer_Code2Doc_Model_32seq',
         model=seq2seq,
         optimizer=optimizer,
+        scheduler=scheduler,
         loss_fn=loss_fn,
         train_loader=train_loader,
         test_loader=test_loader,
+        plotter=AnimatePlotter(),
         device=device,
-        doc_tokenizer=doc_tokenizer
+        doc_tokenizer=doc_tokenizer,
     )
 
     trainer.fit(
-        epochs=30,
-        save_check_point=False,
+        epochs=200,
+        save_check_point=True,
         graph=True
     )
 
