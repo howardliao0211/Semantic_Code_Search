@@ -11,6 +11,7 @@ import model.transformer
 import torch
 import random
 
+random.seed(42)
 bleu = evaluate.load('bleu')
 
 @dataclass
@@ -22,6 +23,68 @@ class CodeDocTrainer(BaseTrainer):
     def fit(self, epochs, trained_epochs = 0, graph = False, save_check_point = False):
         self.trained_epoch = trained_epochs
         return super().fit(epochs, trained_epochs, graph, save_check_point)
+
+    def train_debug(self, to_test:int):
+        self.model.train()
+
+        train_loss = 0.0
+        # source_tokens, decoder_output = next(iter(self.train_loader))
+        src = random.choice(list(self.output_lang.word2index.keys()))
+        tgt = random.choice(list(self.output_lang.word2index.keys()))
+        source_tokens = torch.tensor([self.output_lang.word2index[s] for s in src.split()]).unsqueeze(0).to(self.device)
+        decoder_output = torch.tensor([self.output_lang.word2index[t] for t in tgt.split()] + [EOS_token]).unsqueeze(0).to(self.device)
+
+        with open('debug.txt', 'w') as f:
+            pass
+
+        vocab_size = self.output_lang.n_words
+        pad_token = PAD_token
+
+        for test_idx in range(to_test):
+
+            max_len = (decoder_output != PAD_token).sum(dim=1).max().item()
+            source_tokens = source_tokens.to(self.device)
+            decoder_input = torch.cat(
+                (torch.full((decoder_output.size(0), 1), SOS_token).to(source_tokens.device), decoder_output[:, :-1]),
+                dim=-1
+            )
+            decoder_output = decoder_output.to(self.device)
+
+            decoder_input = decoder_input[:, :max_len]
+            decoder_output = decoder_output[:, :max_len]
+            source_tokens = source_tokens[:, :max_len]  # optional but good to keep aligned
+
+            predict = self.model(
+                src_tensor=source_tokens,
+                decoder_input=decoder_input,
+                src_key_padding_mask=source_tokens == pad_token,
+                tgt_key_padding_mask=decoder_input == pad_token
+            )
+
+            predict = predict[:, :max_len, :]
+
+            loss = self.loss_fn(predict.view(-1, vocab_size), decoder_output.view(-1))
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
+
+            train_loss += loss.item()
+            with open('debug.txt', 'a') as f:
+                print(f'loss: {loss.item(): .5f} ---- {test_idx:5d} / {to_test}')
+                f.write(f'loss: {loss.item(): .5f} ---- {test_idx:5d} / {to_test}\n')
+                f.write(f"     Logits:          {predict[0, 0, :5].data.cpu()}\n")  # First token, first few vocab logits
+                f.write(f"     Prediction:      {predict.argmax(-1)[0]}\n", )     # Entire first sample
+                f.write(f"     Target:          {decoder_output[0]}\n")
+                f.write('\n')
+                f.write(f"     Source:          {self.output_lang.to_word(source_tokens[0].tolist())}\n")
+                f.write(f"     Input :          {self.output_lang.to_word(decoder_input[0].tolist())}\n")
+                f.write(f'     Prediction:      {self.output_lang.to_word(predict.argmax(-1)[0].tolist())}\n')
+                f.write(f"     Target:          {self.output_lang.to_word(decoder_output[0].tolist())}\n")
+                f.write('\n')
+                f.write(f"     Target:          {decoder_output[0]}\n")
+                f.write(f"     PAD positions:   {(decoder_output[0] == PAD_token).nonzero()}\n")
 
     def train_loop(self):
         self.model.train()
@@ -35,12 +98,14 @@ class CodeDocTrainer(BaseTrainer):
             )
             decoder_output = decoder_output.to(self.device)
 
+            tgt_key_padding_mask = tgt_tensor == PAD_token
+            src_key_padding_mask = source_tokens == PAD_token
             # Include decoder input for teacher forcing.
             predict = self.model(
                 src_tensor=source_tokens,
                 decoder_input=tgt_tensor,
-                src_key_padding_mask=None,
-                tgt_key_padding_mask=None,
+                src_key_padding_mask=src_key_padding_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask,
             )
             loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
@@ -80,7 +145,7 @@ class CodeDocTrainer(BaseTrainer):
                     eos_token=EOS_token,
                     pad_token=PAD_token,
                     max_len=decoder_output.size(1),
-                    src_key_padding_mask=None
+                    src_key_padding_mask=src_key_padding_mask
                 )
                 loss = self.loss_fn(predict.contiguous().view(-1, predict.size(-1)), decoder_output.contiguous().view(-1))
                 test_loss += loss.item()
@@ -117,19 +182,19 @@ def main():
     # Dataset hyperparameters
     input_size = 100000
     output_size = 8192
-    batch_size = 32
+    batch_size = 1
     sequence_length = MAX_LENGTH
 
     # Model hyperparameters
-    nblock = 6
-    nhead = 8
-    hidden_size = 512
-    ffn_hidden_size = 2048
+    nblock = 2
+    nhead = 2
+    hidden_size = 128
+    ffn_hidden_size = 256
 
     # Traning hyperparameters
-    dropout_p = 0.3
-    weight_decay = 1e-5
+    dropout_p = 0
     learning_rate = 5e-4
+    weight_decay = 1e-5
     label_smoothing = 0.1
 
     # Get datasets
@@ -201,18 +266,19 @@ def main():
         name='Transformer_Eng_French',
         model=seq2seq,
         optimizer=torch.optim.Adam(seq2seq.parameters(), lr=learning_rate),
-        loss_fn=torch.nn.CrossEntropyLoss(),
+        loss_fn=torch.nn.CrossEntropyLoss(ignore_index=PAD_token),
         train_loader=train_loader,
         test_loader=None,
         device=device,
         output_lang=target_lang
     )
 
-    trainer.fit(
-        epochs=50,
-        save_check_point = True,
-        graph=False
-    )
+    # trainer.fit(
+    #     epochs=50,
+    #     save_check_point = True,
+    #     graph=False
+    # )
+    trainer.train_debug(1000)
 
 if __name__ == '__main__':
     main()

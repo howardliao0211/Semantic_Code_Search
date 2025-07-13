@@ -24,7 +24,8 @@ class Lang:
         self.word2index = {}
         self.word2count = {}
         self.index2word = {0: "SOS", 1: "EOS"}
-        self.n_words = 2  # Count SOS and EOS
+        self.index2word[2] = "PAD"
+        self.n_words = len(self.index2word)
 
     def addSentence(self, sentence):
         for word in sentence.split(' '):
@@ -53,6 +54,12 @@ class Lang:
             word_batch.append(' '.join(words))
 
         return word_batch
+    
+    def to_word(self, indices: list) -> str:
+        words = []
+        for idx in indices:
+            words.append(self.index2word[idx])
+        return ' '.join(words)
 
 # Turn a Unicode string to plain ASCII, thanks to
 # https://stackoverflow.com/a/518232/2809427
@@ -146,8 +153,8 @@ def get_dataloader(batch_size):
     n = len(pairs)
     input_ids = np.zeros((n, MAX_LENGTH), dtype=np.int32)
     target_ids = np.zeros((n, MAX_LENGTH), dtype=np.int32)
-    # input_ids.fill(PAD_token)
-    # target_ids.fill(PAD_token)
+    input_ids.fill(PAD_token)
+    target_ids.fill(PAD_token)
 
     for idx, (inp, tgt) in enumerate(pairs):
         inp_ids = indexesFromSentence(input_lang, inp)

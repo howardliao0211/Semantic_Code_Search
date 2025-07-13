@@ -15,11 +15,12 @@ class PositionEncoding(nn.Module):
 
         self.position_emb_matrix[:, :, 0::2] = torch.sin(position_matrix)
         self.position_emb_matrix[:, :, 1::2] = torch.cos(position_matrix)
+        self.register_buffer("pe", self.position_emb_matrix)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         seq_size = input.size(1)
-        input = input + self.position_emb_matrix[:, :seq_size, :].requires_grad_(False).to(input.device)
+        input = input + self.pe[:, :seq_size, :].requires_grad_(False)
         return self.dropout(input)
 
 class Embeddings(nn.Module):
@@ -79,7 +80,6 @@ class TransformerDecoder(nn.Module):
             tgt_mask=tgt_mask,
             tgt_key_padding_mask=tgt_key_padding_mask,
             memory_key_padding_mask=memory_key_padding_mask,
-            tgt_is_causal=True
         )
         return decoder_output
 
@@ -90,6 +90,7 @@ class Transformer(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.norm = nn.LayerNorm(hidden_size)
         self.final_fc = nn.Linear(hidden_size, output_size)
 
         for p in self.parameters():
@@ -118,8 +119,7 @@ class Transformer(nn.Module):
             memory_key_padding_mask=src_key_padding_mask
         )
 
-        out = torch.tanh(decoder_output).contiguous()
-        final_out = self.final_fc(out)
+        final_out = self.final_fc(self.norm(decoder_output))
         
         return final_out
     
@@ -192,5 +192,5 @@ class Transformer(nn.Module):
         return final_out
     
     def _subsequent_mask(self, size, device):
-        return nn.Transformer.generate_square_subsequent_mask(size, device, dtype=bool)
+        return nn.Transformer.generate_square_subsequent_mask(size, device, dtype=torch.bool)
 
