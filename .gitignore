@@ -3,3 +3,4 @@
 *.arrow
 *.pyc
 /Checkpoints/
+/data/CodeSearchNet

@@ -1,4 +1,4 @@
-from data.dataset import get_datasets
+from data.dataset import get_cleaned_datasets
 from data.tokenizer import Tokenizer
 from pathlib import Path
 from torch.utils.data import DataLoader
@@ -144,13 +144,10 @@ def main():
     label_smoothing = 0.1
 
     # Get datasets
-    DATASET_LOCAL_PATH = Path(fr'./preprocessed_dataset_{sequence_length}')
+    DATASET_LOCAL_PATH = Path(r'data\CodeSearchNet\python')
     code_tokenizer = Tokenizer(input_size)
     doc_tokenizer = Tokenizer(output_size)
-    train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path=DATASET_LOCAL_PATH,
-                                                      code_tokenizer=code_tokenizer,
-                                                      doc_tokenizer=doc_tokenizer,
-                                                      sequence_length=sequence_length)
+    train_dataset, test_dataset, validation_dataset = get_cleaned_datasets(DATASET_LOCAL_PATH, code_tokenizer, doc_tokenizer, sequence_length)
     train_dataset.show_triplets(1, code_tokenizer, doc_tokenizer, skip_special_tokens=False)
 
     # Create data loaders
@@ -234,8 +231,8 @@ def main():
     )
 
     trainer.fit(
-        epochs=200,
-        save_check_point=True,
+        epochs=50,
+        save_check_point=False,
         graph=True
     )
 

@@ -80,8 +80,12 @@ class Tokenizer:
     
     def load_datasets(self, datasets, key):
         for dataset in datasets.values():
-            for data in dataset:
-                self._update_tokens(data[key])
+            if isinstance(dataset, dict):
+                for data in dataset.values():
+                    self._update_tokens(data[key])
+            else:
+                for data in dataset:
+                    self._update_tokens(data[key])
         self._build_vocab()
 
     def _update_tokens(self, tokens: list[str]):

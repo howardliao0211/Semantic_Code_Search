@@ -2,7 +2,12 @@ from datasets import load_dataset, load_from_disk
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from typing import Any
-from .tokenizer import Tokenizer
+try:
+    from .tokenizer import Tokenizer
+except ImportError:
+    from tokenizer import Tokenizer
+
+import json
 import re
 import unicodedata
 import random
@@ -36,8 +41,8 @@ class CodeDocDataset(Dataset):
         decoder_input = self._pad_or_trunc(decoder_input, self.sequence_length)
         decoder_output = self._pad_or_trunc(decoder_output, self.sequence_length)
 
-        encoder_input = torch.tensor(encoder_input, dtype=torch.int32)
-        decoder_input = torch.tensor(decoder_input, dtype=torch.int32)
+        encoder_input = torch.LongTensor(encoder_input)
+        decoder_input = torch.LongTensor(decoder_input)
         decoder_output = torch.LongTensor(decoder_output)
 
         return encoder_input, decoder_input, decoder_output
@@ -61,9 +66,9 @@ class CodeDocDataset(Dataset):
         return tokens
 
 
-def _filter_dataset(ds, min_doc_token: int, max_doc_token: int, min_code_token: int, max_code_token: int, language='python') -> bool:
+def _filter_dataset(ds: dict, min_doc_token: int, max_doc_token: int, min_code_token: int, max_code_token: int, language='python') -> bool:
     # Step 1: Only allow python
-    if ds['language'] != language:
+    if 'language' in ds and ds['language'] != language:
         return False
     
     # Step 2: Check if the coden token length if > min_code_token
@@ -76,7 +81,7 @@ def _filter_dataset(ds, min_doc_token: int, max_doc_token: int, min_code_token: 
         return False
     
     # Step 3: Check if the func documentation only include ascii code (exclude non-english).
-    if ds['func_documentation_string'].isascii() == False:
+    if 'func_documentation_string' in ds and ds['func_documentation_string'].isascii() == False:
         return False
 
     return True
@@ -114,7 +119,7 @@ def _filter_tokens(ds, allow_code_tokens, allow_doc_tokens) -> bool:
 
     return True
 
-def _tokenize(example, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> dict:
+def _encode(example, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer) -> dict:
     return {
         'func_code_tokens': code_tokenizer.to_idx(example['func_code_tokens']),
         'func_documentation_tokens': doc_tokenizer.to_idx(example['func_documentation_tokens']),
@@ -196,7 +201,7 @@ def _prepare_datasets_and_tokenizers(data_local_path: Path, code_tokenizer: Toke
     # Tokenize datasets
     print('Tokenizing dataset...')
     datasets = datasets.map(
-        lambda example: _tokenize(example, code_tokenizer, doc_tokenizer),
+        lambda example: _encode(example, code_tokenizer, doc_tokenizer),
         num_proc=num_process
     )
 
@@ -231,12 +236,102 @@ def get_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer
 
     return train_dataset, test_dataset, validation_dataset
 
+def _read_codesearchnet_json(json_file) -> dict:
+    dataset = {}
+
+    with open(json_file, encoding='utf-8') as f:
+        for idx, line in enumerate(f):
+            line=line.strip()
+            js=json.loads(line)
+            if 'idx' not in js:
+                js['idx']=idx
+            code=' '.join(js['code_tokens']).replace('\n',' ')
+            code=' '.join(code.strip().split())
+            nl=' '.join(js['docstring_tokens']).replace('\n','')
+            nl=' '.join(nl.strip().split())
+            
+            dataset[idx] = {
+                'func_code_tokens': code.split(),
+                'func_documentation_tokens': _normalize_string(nl)
+            }
+    
+    return dataset
+
+def get_cleaned_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, sequence_length: int):
+    eos_token, bos_token, pad_token = code_tokenizer.eos_token, code_tokenizer.bos_token, code_tokenizer.pad_token
+
+    # load dataset
+    print(f'Reading datasets')
+    datasets = {}
+    datasets['train'] = _read_codesearchnet_json(str(data_local_path/'train.jsonl'))
+    datasets['test']  = _read_codesearchnet_json(str(data_local_path/'test.jsonl'))
+    datasets['validation']  = _read_codesearchnet_json(str(data_local_path/'valid.jsonl'))
+
+    # Filter by length
+    print(f'Filtering datasets')
+    for key in datasets:
+        filter_iter = filter_iter = filter(
+            lambda x: _filter_dataset(x, 0, sequence_length-1, 0, sequence_length-1),
+            datasets[key].values()
+        )
+        datasets[key] = {
+            idx: value for idx, value in enumerate(filter_iter)
+        }
+    
+    # Building tokenizer
+    code_tokenizer.load_datasets(datasets, 'func_code_tokens')
+    doc_tokenizer.load_datasets(datasets, 'func_documentation_tokens')
+    print(f'code tokens: {len(code_tokenizer)}')
+    print(f'doc_tokens: {len(doc_tokenizer)}')
+
+    # Filter the dataset to only include data with recognizable tokens
+    print('Filtering dataset with allow tokens...')
+    for key in datasets:
+        filter_iter = filter_iter = filter(
+            lambda x: _filter_tokens(
+                ds=x,
+                allow_code_tokens=code_tokenizer.most_freq_tokens,
+                allow_doc_tokens=doc_tokenizer.most_freq_tokens
+            ),
+            datasets[key].values()
+        )
+        datasets[key] = {
+            idx: value for idx, value in enumerate(filter_iter)
+        }
+    
+    # Encode tokens
+    for key in datasets:
+        map_iter = filter_iter = map(
+            lambda x: _encode(x, code_tokenizer, doc_tokenizer),
+            datasets[key].values()
+        )
+    
+        datasets[key] = {
+            idx: value for idx, value in enumerate(map_iter)
+        }
+
+    train_dataset = CodeDocDataset(datasets['train'], sequence_length, eos_token, bos_token, pad_token)
+    test_dataset = CodeDocDataset(datasets['test'], sequence_length, eos_token, bos_token, pad_token)
+    validation_dataset = CodeDocDataset(datasets['validation'], sequence_length, eos_token, bos_token, pad_token)
+
+    print(f'Train Dataset Size: {len(train_dataset)}')
+    print(f'Test Dataset Size: {len(test_dataset)}')
+    print(f'Validation Dataset Size: {len(validation_dataset)}')
+
+    return train_dataset, test_dataset, validation_dataset
+
 if __name__ == '__main__':
-    min_doc_token, max_doc_token, min_code_token, max_code_token = 0, 256, 0, 256
-    data_local_path = pathlib.Path.cwd() / 'data' / 'preprocessed_dataset'
-    tokenizer = Tokenizer()
-    train_dataset, test_dataset, validation_dataset = get_datasets(data_local_path, tokenizer, sequence_length=256)
-    print(len(tokenizer))
+    # Dataset hyperparameters
+    input_size = 100000
+    output_size = 8192
+    batch_size = 32
+    sequence_length = 32
+
+    DATASET_LOCAL_PATH = Path(r'data\CodeSearchNet\python')
+    code_tokenizer = Tokenizer(input_size)
+    doc_tokenizer = Tokenizer(output_size)
+    train_dataset, test_dataset, validation_dataset = get_cleaned_datasets(DATASET_LOCAL_PATH, code_tokenizer, doc_tokenizer, sequence_length)
+    train_dataset.show_triplets(1, code_tokenizer, doc_tokenizer, skip_special_tokens=False)
 
 
 
