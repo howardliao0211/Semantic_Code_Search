@@ -158,7 +158,11 @@ class Transformer(nn.Module):
                 memory_key_padding_mask=src_key_padding_mask,
             )
 
-            next_token = logit[:, -1, :].argmax(dim=-1, keepdim=True)
+            logit = logit[:, -1, :]
+            logit = torch.tanh(logit)
+            logit = self.final_fc(logit)
+
+            next_token = logit.argmax(dim=-1, keepdim=True)
 
             # Mask next_token to pad for finished sequences
             next_token = next_token.masked_fill(finished.unsqueeze(1), pad_token)
@@ -167,7 +171,7 @@ class Transformer(nn.Module):
             finished = finished | (next_token.squeeze(1) == eos_token)
 
             decoder_input = torch.cat((decoder_input, next_token), dim=1)
-            logits.append(logit[:, -1, :])
+            logits.append(logit)
 
             if finished.all():
                 break
@@ -186,10 +190,7 @@ class Transformer(nn.Module):
             )
             logits = torch.cat((logits, to_pad), dim=1)
 
-        out = torch.tanh(logits).contiguous()
-        final_out = self.final_fc(out)
-        
-        return final_out
+        return logits
     
     def _subsequent_mask(self, size, device):
         return nn.Transformer.generate_square_subsequent_mask(size, device, dtype=torch.bool)

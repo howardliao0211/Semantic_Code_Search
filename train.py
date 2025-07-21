@@ -123,32 +123,43 @@ def get_class_weight_vector(tokenizer: Tokenizer) -> torch.Tensor:
     
     return weight_vector / weight_vector.sum() # normalize weight
 
+def rate(step, model_size, factor, warmup):
+    """
+    we have to default the step to 1 for LambdaLR function
+    to avoid zero raising to negative power.
+    """
+    if step == 0:
+        step = 1
+    return factor * (
+        model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5))
+    )
+
 def main():
 
     # Dataset hyperparameters
-    input_size = 100000
-    output_size = 8192
-    batch_size = 32
-    sequence_length = 32
+    input_size = 50*1_000_000
+    output_size = 50*1_000_000
+    batch_size = 64
+    sequence_length = 128
 
     # Model hyperparameters
     nblock = 2
     nhead = 2
-    hidden_size = 128
-    ffn_hidden_size = 512
+    hidden_size = 64
+    ffn_hidden_size = hidden_size*4
 
     # Traning hyperparameters
     dropout_p = 0.1
     weight_decay = 1e-5
-    learning_rate = 5e-4
     label_smoothing = 0.1
+    scheduler_warmup = 4000
 
     # Get datasets
     DATASET_LOCAL_PATH = Path(r'data\CodeSearchNet\python')
     code_tokenizer = Tokenizer(input_size)
     doc_tokenizer = Tokenizer(output_size)
     train_dataset, test_dataset, validation_dataset = get_cleaned_datasets(DATASET_LOCAL_PATH, code_tokenizer, doc_tokenizer, sequence_length)
-    train_dataset.show_triplets(1, code_tokenizer, doc_tokenizer, skip_special_tokens=False)
+    # train_dataset.show_triplets(1, code_tokenizer, doc_tokenizer, skip_special_tokens=False)
 
     # Create data loaders
     train_loader = DataLoader(
@@ -201,24 +212,32 @@ def main():
         output_size=decoder_output_size
     ).to(device)
 
-    # # Get class weight
+    total_params = sum(p.numel() for p in seq2seq.parameters())
+    print(f"Total parameters: {total_params:,}")
+
+    # Get class weight
     class_weight = get_class_weight_vector(doc_tokenizer).to(device)
 
     # Optimizer and Loss Function
-    def noam_lambda(step):
-        step = max(step, 1)
-        return (512 ** -0.5) * min(step ** -0.5, step * 4000 ** -1.5)
-
-    optimizer = torch.optim.Adam(seq2seq.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=noam_lambda)
+    optimizer = torch.optim.Adam(seq2seq.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer=optimizer,
+        lr_lambda=lambda step: rate(
+            step=step,
+            model_size=hidden_size,
+            factor=1,
+            warmup=scheduler_warmup
+        )
+    )
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=code_tokenizer.pad_token, label_smoothing=label_smoothing, weight=class_weight)
 
     print(f'encoder_input_size: {encoder_input_size}')
     print(f'decoder_output_size: {decoder_output_size}')
 
     # Prepare Trainer
+    model_name = f'Transformer_nblock{nblock}_nhead{nhead}_hidden{hidden_size}_ffn_{ffn_hidden_size}_seq{sequence_length}'
     trainer = CodeDocTrainer(
-        name='Transformer_Code2Doc_Model_32seq',
+        name=model_name,
         model=seq2seq,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -231,8 +250,8 @@ def main():
     )
 
     trainer.fit(
-        epochs=50,
-        save_check_point=False,
+        epochs=200,
+        save_check_point=True,
         graph=True
     )
 

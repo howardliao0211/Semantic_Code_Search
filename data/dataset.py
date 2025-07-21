@@ -33,13 +33,17 @@ class CodeDocDataset(Dataset):
         source_tokens = self.dataset[index]['func_code_tokens']
         target_tokens = self.dataset[index]['func_documentation_tokens']
 
-        encoder_input = source_tokens + [self.eos_token]
-        decoder_input = [self.bos_token] + target_tokens
-        decoder_output = target_tokens + [self.eos_token]
+        # reserved one more space for bos/eos
+        source_len = len(source_tokens)
+        target_len = len(target_tokens)
 
-        encoder_input = self._pad_or_trunc(encoder_input, self.sequence_length)
-        decoder_input = self._pad_or_trunc(decoder_input, self.sequence_length)
-        decoder_output = self._pad_or_trunc(decoder_output, self.sequence_length)
+        encoder_input = self._pad_or_trunc(source_tokens, self.sequence_length - 1)
+        decoder_input = self._pad_or_trunc(target_tokens, self.sequence_length - 1)
+        decoder_output = self._pad_or_trunc(target_tokens, self.sequence_length - 1)
+
+        encoder_input.insert(source_len, self.eos_token)
+        decoder_input.insert(0, self.bos_token)
+        decoder_output.insert(target_len, self.eos_token)
 
         encoder_input = torch.LongTensor(encoder_input)
         decoder_input = torch.LongTensor(decoder_input)
@@ -63,7 +67,7 @@ class CodeDocDataset(Dataset):
         if len(tokens) < sequence_length:
             return tokens + [self.pad_token for _ in range(sequence_length - len(tokens))]
         
-        return tokens
+        return tokens.copy()
 
 
 def _filter_dataset(ds: dict, min_doc_token: int, max_doc_token: int, min_code_token: int, max_code_token: int, language='python') -> bool:
@@ -258,7 +262,8 @@ def _read_codesearchnet_json(json_file) -> dict:
     return dataset
 
 def get_cleaned_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_tokenizer: Tokenizer, sequence_length: int):
-    eos_token, bos_token, pad_token = code_tokenizer.eos_token, code_tokenizer.bos_token, code_tokenizer.pad_token
+
+    min_sequence_length = 3
 
     # load dataset
     print(f'Reading datasets')
@@ -268,40 +273,26 @@ def get_cleaned_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_t
     datasets['validation']  = _read_codesearchnet_json(str(data_local_path/'valid.jsonl'))
 
     # Filter by length
-    print(f'Filtering datasets')
+    print(f'Filtering dataset by length (word-level)')
     for key in datasets:
         filter_iter = filter_iter = filter(
-            lambda x: _filter_dataset(x, 0, sequence_length-1, 0, sequence_length-1),
+            lambda x: _filter_dataset(x, min_sequence_length, sequence_length-1, min_sequence_length, sequence_length-1),
             datasets[key].values()
         )
         datasets[key] = {
             idx: value for idx, value in enumerate(filter_iter)
         }
-    
+
     # Building tokenizer
     code_tokenizer.load_datasets(datasets, 'func_code_tokens')
     doc_tokenizer.load_datasets(datasets, 'func_documentation_tokens')
     print(f'code tokens: {len(code_tokenizer)}')
     print(f'doc_tokens: {len(doc_tokenizer)}')
 
-    # Filter the dataset to only include data with recognizable tokens
-    print('Filtering dataset with allow tokens...')
-    for key in datasets:
-        filter_iter = filter_iter = filter(
-            lambda x: _filter_tokens(
-                ds=x,
-                allow_code_tokens=code_tokenizer.most_freq_tokens,
-                allow_doc_tokens=doc_tokenizer.most_freq_tokens
-            ),
-            datasets[key].values()
-        )
-        datasets[key] = {
-            idx: value for idx, value in enumerate(filter_iter)
-        }
-    
     # Encode tokens
+    print(f'Encoding')
     for key in datasets:
-        map_iter = filter_iter = map(
+        map_iter = map(
             lambda x: _encode(x, code_tokenizer, doc_tokenizer),
             datasets[key].values()
         )
@@ -309,6 +300,19 @@ def get_cleaned_datasets(data_local_path: Path, code_tokenizer: Tokenizer, doc_t
         datasets[key] = {
             idx: value for idx, value in enumerate(map_iter)
         }
+    
+    # Filter by length
+    print(f'Filtering dataset by length (token-level)')
+    for key in datasets:
+        filter_iter = filter(
+            lambda x: _filter_dataset(x, min_sequence_length, sequence_length-1, min_sequence_length, sequence_length-1),
+            datasets[key].values()
+        )
+        datasets[key] = {
+            idx: value for idx, value in enumerate(filter_iter)
+        }
+
+    eos_token, bos_token, pad_token = code_tokenizer.eos_token, code_tokenizer.bos_token, code_tokenizer.pad_token
 
     train_dataset = CodeDocDataset(datasets['train'], sequence_length, eos_token, bos_token, pad_token)
     test_dataset = CodeDocDataset(datasets['test'], sequence_length, eos_token, bos_token, pad_token)
