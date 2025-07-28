@@ -1,9 +1,10 @@
+import trainers.utils
 from data.dataset import get_cleaned_datasets
 from data.tokenizer import Tokenizer
 from pathlib import Path
 from torch.utils.data import DataLoader
 from trainers.core import BaseTrainer
-from trainers.utils import AnimatePlotter
+from trainers.utils import AnimatePlotter, load_checkpoint
 from dataclasses import dataclass
 import math
 import datetime
@@ -23,8 +24,73 @@ bleu = evaluate.load('bleu')
 class CodeDocTrainer(BaseTrainer):
 
     model: model.transformer.Transformer
-    scheduler: torch.optim.lr_scheduler.LambdaLR
     doc_tokenizer: Tokenizer
+
+    def train_loop_overfit_check(self, to_run: int):
+        '''
+        Check if the model can overfit for a smaller dataset.
+        '''
+
+        self.model.train()
+
+        train_loss = 0.0
+        source_tokens, decoder_input, decoder_output = next(iter(self.train_loader))
+
+        for idx in range(to_run):
+            source_tokens: torch.Tensor = source_tokens.to(self.device)
+            decoder_input: torch.Tensor = decoder_input.to(self.device)
+            decoder_output: torch.Tensor = decoder_output.to(self.device)
+            
+            tgt_key_padding_mask = decoder_input == self.doc_tokenizer.pad_token
+            src_key_padding_mask = source_tokens == self.doc_tokenizer.pad_token
+
+            # Include decoder input for teacher forcing.
+            # Can always train with teaching forcing because tgt_mask is provided.
+            predict:torch.Tensor = self.model(
+                src_tensor=source_tokens,
+                decoder_input=decoder_input,
+                src_key_padding_mask=src_key_padding_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask
+            )
+
+            loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            self.scheduler.step()
+
+            train_loss += loss.item()
+            if (idx + 1) % 100 == 0:
+                print(f'    loss: {loss.item(): .5f} ---- {idx + 1} / {to_run}')
+        
+        bos_token = self.doc_tokenizer.bos_token
+        eos_token = self.doc_tokenizer.eos_token
+        pad_token = self.doc_tokenizer.pad_token
+
+        with torch.no_grad():
+            src_key_padding_mask = source_tokens == pad_token
+            predict = self.model.forward_autoregressively(
+                src_tensor=source_tokens,
+                bos_token=bos_token,
+                eos_token=eos_token,
+                pad_token=pad_token,
+                max_len=decoder_output.size(1),
+                src_key_padding_mask=src_key_padding_mask
+            )
+        
+            # Convert predicted token IDs to words
+            batch_pred_ids = torch.argmax(predict, dim=-1).tolist()  # shape: (batch_size, seq_len)
+            batch_preds = self.doc_tokenizer.to_word_batch(batch_pred_ids)  # List[str]
+
+            # Convert reference token IDs to words
+            batch_refs = self.doc_tokenizer.to_word_batch(decoder_output.tolist())  # List[str]
+        
+        for i, (pred, ref) in enumerate(zip(batch_preds, batch_refs)):
+            print(f'#{i+1}:')
+            print(f'    pred: {pred}')
+            print(f'    ref : {ref}')
+            
 
     def train_loop(self):
         self.model.train()
@@ -139,18 +205,18 @@ def main():
     # Dataset hyperparameters
     input_size = 50*1_000_000
     output_size = 50*1_000_000
-    batch_size = 64
+    batch_size = 32
     sequence_length = 128
 
     # Model hyperparameters
-    nblock = 2
-    nhead = 2
-    hidden_size = 64
-    ffn_hidden_size = hidden_size*4
+    nblock = 4
+    nhead = 4
+    hidden_size = 192 
+    ffn_hidden_size = 384
 
     # Traning hyperparameters
-    dropout_p = 0.1
-    weight_decay = 1e-5
+    dropout_p = 0.3
+    weight_decay = 1e-2
     label_smoothing = 0.1
     scheduler_warmup = 4000
 
@@ -219,7 +285,7 @@ def main():
     class_weight = get_class_weight_vector(doc_tokenizer).to(device)
 
     # Optimizer and Loss Function
-    optimizer = torch.optim.Adam(seq2seq.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9, weight_decay=weight_decay)
+    optimizer = torch.optim.AdamW(seq2seq.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer=optimizer,
         lr_lambda=lambda step: rate(
@@ -234,8 +300,18 @@ def main():
     print(f'encoder_input_size: {encoder_input_size}')
     print(f'decoder_output_size: {decoder_output_size}')
 
+    # Load checkpoint
+    # checkpoint_path = r'Checkpoints\Transformer_nblock6_nhead4_hidden128_ffn_512_seq32\20250721\Transformer_nblock6_nhead4_hidden128_ffn_512_seq32_epoch1_20250721_224121.pt'
+    # checkpoint = load_checkpoint(
+    #     checkpoint_path=checkpoint_path,
+    #     model=seq2seq,
+    #     optimizer=optimizer,
+    #     scheduler=scheduler,
+    #     device=device
+    # )
+
     # Prepare Trainer
-    model_name = f'Transformer_nblock{nblock}_nhead{nhead}_hidden{hidden_size}_ffn_{ffn_hidden_size}_seq{sequence_length}'
+    model_name = f'Transformer_nblock{nblock}_nhead{nhead}_hidden{hidden_size}_ffn_{ffn_hidden_size}seq{sequence_length}'
     trainer = CodeDocTrainer(
         name=model_name,
         model=seq2seq,
@@ -251,9 +327,12 @@ def main():
 
     trainer.fit(
         epochs=200,
+        # trained_epochs=checkpoint['epoch'],
         save_check_point=True,
         graph=True
     )
+
+    # trainer.train_loop_overfit_check(1000)
 
 if __name__ == '__main__':
     main()
