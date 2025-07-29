@@ -4,3 +4,4 @@
 *.pyc
 /Checkpoints/
 /data/CodeSearchNet
+/lightning_logs

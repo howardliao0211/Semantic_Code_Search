@@ -1,14 +1,13 @@
-import trainers.utils
 from data.dataset import get_cleaned_datasets
 from data.tokenizer import Tokenizer
 from pathlib import Path
 from torch.utils.data import DataLoader
-from trainers.core import BaseTrainer
-from trainers.utils import AnimatePlotter, load_checkpoint
 from dataclasses import dataclass
+from torchmetrics.text import BLEUScore
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+import lightning as L
 import math
 import datetime
-import evaluate
 import model
 import torch
 import model.transformer
@@ -18,133 +17,49 @@ import model.seq2seq
 import random
 import pathlib
 
-bleu = evaluate.load('bleu')
+class ModelWrapper(L.LightningModule):
 
-@dataclass
-class CodeDocTrainer(BaseTrainer):
+    def __init__(self, model, loss_fn, optim, scheduler, doc_tokenizer: Tokenizer):
+        super().__init__()
+        self.model = model
+        self.loss_fn = loss_fn
+        self.optim = optim
+        self.scheduler = scheduler
+        self.doc_tokenizer = doc_tokenizer
+    
+    def training_step(self, batch, batch_idx):
 
-    model: model.transformer.Transformer
-    doc_tokenizer: Tokenizer
+        source_tokens, decoder_input, decoder_output = batch
 
-    def train_loop_overfit_check(self, to_run: int):
-        '''
-        Check if the model can overfit for a smaller dataset.
-        '''
+        tgt_key_padding_mask = decoder_input == self.doc_tokenizer.pad_token
+        src_key_padding_mask = source_tokens == self.doc_tokenizer.pad_token
 
-        self.model.train()
-
-        train_loss = 0.0
-        source_tokens, decoder_input, decoder_output = next(iter(self.train_loader))
-
-        for idx in range(to_run):
-            source_tokens: torch.Tensor = source_tokens.to(self.device)
-            decoder_input: torch.Tensor = decoder_input.to(self.device)
-            decoder_output: torch.Tensor = decoder_output.to(self.device)
-            
-            tgt_key_padding_mask = decoder_input == self.doc_tokenizer.pad_token
-            src_key_padding_mask = source_tokens == self.doc_tokenizer.pad_token
-
-            # Include decoder input for teacher forcing.
-            # Can always train with teaching forcing because tgt_mask is provided.
-            predict:torch.Tensor = self.model(
+        predict:torch.Tensor = self.model(
                 src_tensor=source_tokens,
                 decoder_input=decoder_input,
                 src_key_padding_mask=src_key_padding_mask,
                 tgt_key_padding_mask=tgt_key_padding_mask
             )
 
-            loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
+        loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
+        self.log('train loss', loss, prog_bar=True)
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            self.scheduler.step()
+        self.scheduler.step()
 
-            train_loss += loss.item()
-            if (idx + 1) % 100 == 0:
-                print(f'    loss: {loss.item(): .5f} ---- {idx + 1} / {to_run}')
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        references = []
+        predictions = []
+
+        source_tokens, _, decoder_output = batch
         
         bos_token = self.doc_tokenizer.bos_token
         eos_token = self.doc_tokenizer.eos_token
         pad_token = self.doc_tokenizer.pad_token
+        src_key_padding_mask = source_tokens == pad_token
 
-        with torch.no_grad():
-            src_key_padding_mask = source_tokens == pad_token
-            predict = self.model.forward_autoregressively(
-                src_tensor=source_tokens,
-                bos_token=bos_token,
-                eos_token=eos_token,
-                pad_token=pad_token,
-                max_len=decoder_output.size(1),
-                src_key_padding_mask=src_key_padding_mask
-            )
-        
-            # Convert predicted token IDs to words
-            batch_pred_ids = torch.argmax(predict, dim=-1).tolist()  # shape: (batch_size, seq_len)
-            batch_preds = self.doc_tokenizer.to_word_batch(batch_pred_ids)  # List[str]
-
-            # Convert reference token IDs to words
-            batch_refs = self.doc_tokenizer.to_word_batch(decoder_output.tolist())  # List[str]
-        
-        for i, (pred, ref) in enumerate(zip(batch_preds, batch_refs)):
-            print(f'#{i+1}:')
-            print(f'    pred: {pred}')
-            print(f'    ref : {ref}')
-            
-
-    def train_loop(self):
-        self.model.train()
-
-        train_loss = 0.0
-        for batch, (source_tokens, decoder_input, decoder_output) in enumerate(self.train_loader):
-            source_tokens: torch.Tensor = source_tokens.to(self.device)
-            decoder_input: torch.Tensor = decoder_input.to(self.device)
-            decoder_output: torch.Tensor = decoder_output.to(self.device)
-            
-            tgt_key_padding_mask = decoder_input == self.doc_tokenizer.pad_token
-            src_key_padding_mask = source_tokens == self.doc_tokenizer.pad_token
-
-            # Include decoder input for teacher forcing.
-            # Can always train with teaching forcing because tgt_mask is provided.
-            predict:torch.Tensor = self.model(
-                src_tensor=source_tokens,
-                decoder_input=decoder_input,
-                src_key_padding_mask=src_key_padding_mask,
-                tgt_key_padding_mask=tgt_key_padding_mask
-            )
-
-            loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            self.scheduler.step()
-
-            train_loss += loss.item()
-            if (batch + 1) % 64 == 0:
-                print(f'    loss: {loss.item(): .5f} ---- {batch + 1} / {len(self.train_loader)}')
-        
-        train_loss /= len(self.train_loader)
-        return {'Train Loss': train_loss}
-    
-    def test_loop(self):
-        self.model.eval()
-        
-        test_loss = 0.0
-        references = []
-        predictions = []
-
-        for source_tokens, _, decoder_output in self.test_loader:
-            source_tokens = source_tokens.to(self.device)
-            decoder_output = decoder_output.to(self.device)
-
-            bos_token = self.doc_tokenizer.bos_token
-            eos_token = self.doc_tokenizer.eos_token
-            pad_token = self.doc_tokenizer.pad_token
-
-            with torch.no_grad():
-                src_key_padding_mask = source_tokens == pad_token
-                predict = self.model.forward_autoregressively(
+        predict = self.model.forward_autoregressively(
                     src_tensor=source_tokens,
                     bos_token=bos_token,
                     eos_token=eos_token,
@@ -152,32 +67,76 @@ class CodeDocTrainer(BaseTrainer):
                     max_len=decoder_output.size(1),
                     src_key_padding_mask=src_key_padding_mask
                 )
-                loss = self.loss_fn(predict.contiguous().view(-1, predict.size(-1)), decoder_output.contiguous().view(-1))
-                test_loss += loss.item()
-            
-                # Convert predicted token IDs to words
-                batch_pred_ids = torch.argmax(predict, dim=-1).tolist()  # shape: (batch_size, seq_len)
-                batch_preds = self.doc_tokenizer.to_word_batch(batch_pred_ids)  # List[str]
-                predictions.extend(batch_preds)  # flat list
 
-                # Convert reference token IDs to words
-                batch_refs = self.doc_tokenizer.to_word_batch(decoder_output.tolist())  # List[str]
-                references.extend([[ref] for ref in batch_refs])  # wrap each in a list: List[List[str]]
+        loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
 
-        # Compute test loss
-        test_loss /= len(self.test_loader)
+        # Convert predicted token IDs to words
+        batch_pred_ids = torch.argmax(predict, dim=-1).tolist()  # shape: (batch_size, seq_len)
+        batch_preds = self.doc_tokenizer.to_word_batch(batch_pred_ids)  # List[str]
+        predictions.extend(batch_preds)  # flat list
 
-        # Compute Bleu score based on the first sequence in the last batch
-        results = bleu.compute(predictions=predictions, references=references)
-
-        # Print Message
-        print(f'Test Loss: {test_loss:5f}, Bleu: {results['bleu']:.5f}')
+        # Convert reference token IDs to words
+        batch_refs = self.doc_tokenizer.to_word_batch(decoder_output.tolist())  # List[str]
+        references.extend([[ref] for ref in batch_refs])  # wrap each in a list: List[List[str]]
         
-        # Randomly display one prediction/reference pair
-        rand_idx = random.randint(0, len(predictions) - 1)
-        print(f"Prediction: {predictions[rand_idx]}")
-        print(f"Reference : {references[rand_idx][0]}")
-        return {'Test Loss': test_loss, 'Bleu': results['bleu']}
+        # Compute Bleu score
+        bleu = BLEUScore()
+        bleu_score = bleu(predictions, references)
+
+        log_dict = {
+            'test loss': loss,
+            'bleu': bleu_score
+        }
+
+        self.log_dict(log_dict, prog_bar=True)
+    
+    def validation_step(self, batch, batch_idx):
+        references = []
+        predictions = []
+
+        source_tokens, _, decoder_output = batch
+        
+        bos_token = self.doc_tokenizer.bos_token
+        eos_token = self.doc_tokenizer.eos_token
+        pad_token = self.doc_tokenizer.pad_token
+        src_key_padding_mask = source_tokens == pad_token
+
+        predict = self.model.forward_autoregressively(
+                    src_tensor=source_tokens,
+                    bos_token=bos_token,
+                    eos_token=eos_token,
+                    pad_token=pad_token,
+                    max_len=decoder_output.size(1),
+                    src_key_padding_mask=src_key_padding_mask
+                )
+
+        loss = self.loss_fn(predict.view(-1, predict.size(-1)), decoder_output.view(-1))
+
+        # Convert predicted token IDs to words
+        batch_pred_ids = torch.argmax(predict, dim=-1).tolist()  # shape: (batch_size, seq_len)
+        batch_preds = self.doc_tokenizer.to_word_batch(batch_pred_ids)  # List[str]
+        predictions.extend(batch_preds)  # flat list
+
+        # Convert reference token IDs to words
+        batch_refs = self.doc_tokenizer.to_word_batch(decoder_output.tolist())  # List[str]
+        references.extend([[ref] for ref in batch_refs])  # wrap each in a list: List[List[str]]
+        
+        # Compute Bleu score
+        bleu = BLEUScore()
+        bleu_score = bleu(predictions, references)
+
+        log_dict = {
+            'val loss': loss,
+            'bleu': bleu_score
+        }
+
+        self.log_dict(log_dict, prog_bar=True)
+
+    def configure_optimizers(self):
+        return {
+            'optimizer': self.optim,
+            'lr_scheduler': self.scheduler
+        }
 
 def get_class_weight_vector(tokenizer: Tokenizer) -> torch.Tensor:
     num_of_class = len(tokenizer)
@@ -205,7 +164,7 @@ def main():
     # Dataset hyperparameters
     input_size = 50*1_000_000
     output_size = 50*1_000_000
-    batch_size = 32
+    batch_size = 64
     sequence_length = 128
 
     # Model hyperparameters
@@ -231,13 +190,17 @@ def main():
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        shuffle=True
+        shuffle=True,
+        num_workers=4,
+        persistent_workers=True
     )
 
     test_loader = DataLoader(
         dataset=test_dataset,
         batch_size=batch_size,
-        shuffle=False
+        shuffle=False,
+        num_workers=4,
+        persistent_workers=True
     )
 
     val_loader = DataLoader(
@@ -278,9 +241,6 @@ def main():
         output_size=decoder_output_size
     ).to(device)
 
-    total_params = sum(p.numel() for p in seq2seq.parameters())
-    print(f"Total parameters: {total_params:,}")
-
     # Get class weight
     class_weight = get_class_weight_vector(doc_tokenizer).to(device)
 
@@ -300,39 +260,29 @@ def main():
     print(f'encoder_input_size: {encoder_input_size}')
     print(f'decoder_output_size: {decoder_output_size}')
 
-    # Load checkpoint
-    # checkpoint_path = r'Checkpoints\Transformer_nblock6_nhead4_hidden128_ffn_512_seq32\20250721\Transformer_nblock6_nhead4_hidden128_ffn_512_seq32_epoch1_20250721_224121.pt'
-    # checkpoint = load_checkpoint(
-    #     checkpoint_path=checkpoint_path,
-    #     model=seq2seq,
-    #     optimizer=optimizer,
-    #     scheduler=scheduler,
-    #     device=device
-    # )
-
     # Prepare Trainer
-    model_name = f'Transformer_nblock{nblock}_nhead{nhead}_hidden{hidden_size}_ffn_{ffn_hidden_size}seq{sequence_length}'
-    trainer = CodeDocTrainer(
-        name=model_name,
+    early_stopping = EarlyStopping(
+        monitor='val loss',
+    )
+
+    model_wrapper = ModelWrapper(
         model=seq2seq,
-        optimizer=optimizer,
-        scheduler=scheduler,
         loss_fn=loss_fn,
-        train_loader=train_loader,
-        test_loader=test_loader,
-        plotter=AnimatePlotter(),
-        device=device,
-        doc_tokenizer=doc_tokenizer,
+        optim=optimizer,
+        scheduler=scheduler,
+        doc_tokenizer=doc_tokenizer
+    )
+
+    trainer = L.Trainer(
+        callbacks=[early_stopping],
+        accumulate_grad_batches=8
     )
 
     trainer.fit(
-        epochs=200,
-        # trained_epochs=checkpoint['epoch'],
-        save_check_point=True,
-        graph=True
+        model=model_wrapper,
+        train_dataloaders=train_loader,
+        val_dataloaders=test_loader,
     )
-
-    # trainer.train_loop_overfit_check(1000)
 
 if __name__ == '__main__':
     main()
